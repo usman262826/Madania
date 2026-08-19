@@ -56,6 +56,7 @@ import { enToBnNumber, cn, isClassMatch, formatDateToDDMMYYYY } from '../../lib/
 import { calculateStudentMark, generateStudentAttendanceSMS } from '../../utils/attendanceCalculators';
 import { TipsoiSyncModal } from './TipsoiSyncModal';
 import { AttendanceMessaging } from './AttendanceMessaging';
+import { StudentAttendanceReportModal } from './StudentAttendanceReportModal';
 import { 
   getDailyAttendanceDb, 
   saveDailyAttendanceDb,
@@ -146,6 +147,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
   const [showCriteriaModal, setShowCriteriaModal] = useState(false);
   const [editingCriteria, setEditingCriteria] = useState<AttendanceMarkingCriteria | null>(null);
   const [selectedStudentForProfile, setSelectedStudentForProfile] = useState<Student | null>(null);
+  const [selectedStudentForReport, setSelectedStudentForReport] = useState<Student | null>(null);
   
   // Manual Modification Modal State
   const [manualEditStudent, setManualEditStudent] = useState<Student | null>(null);
@@ -830,7 +832,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                           {/* Name & ID */}
                           <td className="p-3">
                             <div 
-                              onClick={() => setSelectedStudentForProfile(student)}
+                              onClick={() => setSelectedStudentForReport(student)}
                               className="font-bold text-[var(--color-text-main)] hover:text-teal-600 cursor-pointer flex items-center gap-1.5"
                             >
                               <span>{student['শিক্ষার্থীর নাম'] || student.name}</span>
@@ -928,13 +930,14 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                           {/* Actions */}
                           <td className="p-3 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              {/* View Daily Timeline */}
+                              {/* View Individual Student Attendance Report */}
                               <button
-                                onClick={() => setSelectedStudentForProfile(student)}
-                                className="p-1.5 rounded-lg bg-[var(--color-bg)] hover:bg-teal-500/10 hover:text-teal-600 text-[var(--color-text-light)] transition-all"
-                                title="পাঞ্চ টাইমলাইন দেখুন"
+                                onClick={() => setSelectedStudentForReport(student)}
+                                className="px-2.5 py-1 rounded-lg bg-teal-500/10 hover:bg-teal-600 hover:text-white text-teal-700 dark:text-teal-300 font-bold text-xs flex items-center gap-1 transition-all border border-teal-500/20 shadow-2xs cursor-pointer"
+                                title="ব্যক্তিগত সকল হাজিরা ও পাঞ্চ রিপোর্ট দেখুন"
                               >
-                                <Activity size={14} />
+                                <Eye size={13} />
+                                <span>ভিউ</span>
                               </button>
 
                               {/* Manual Edit Button */}
@@ -944,7 +947,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                                   setManualStatus(record.status);
                                   setManualReason('');
                                 }}
-                                className="p-1.5 rounded-lg bg-[var(--color-bg)] hover:bg-amber-500/10 hover:text-amber-600 text-[var(--color-text-light)] transition-all"
+                                className="p-1.5 rounded-lg bg-[var(--color-bg)] hover:bg-amber-500/10 hover:text-amber-600 text-[var(--color-text-light)] transition-all border border-[var(--color-border-main)]"
                                 title="ম্যানুয়াল সংশোধন"
                               >
                                 <Edit3 size={14} />
@@ -958,7 +961,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                                     setDailyDb(getDailyAttendanceDb());
                                     toast.success('শিক্ষার্থীর ভর্তি সফলভাবে পুনর্বহাল করা হয়েছে!');
                                   }}
-                                  className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold"
+                                  className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold shadow-2xs"
                                   title="ভর্তি পুনর্বহাল করুন"
                                 >
                                   পুনর্বহাল
@@ -1084,7 +1087,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                 });
                 setShowCriteriaModal(true);
               }}
-              className="px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold flex items-center gap-1.5"
+              className="px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
             >
               <Plus size={14} />
               <span>নতুন ক্রাইটেরিয়া যোগ</span>
@@ -1093,17 +1096,26 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {criteriaList.map(crit => (
-              <div key={crit.id} className="p-4 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] space-y-2">
+              <div key={crit.id} className="p-4 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] space-y-3 shadow-xs">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-xs text-[var(--color-text-main)]">{crit.class}</span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-teal-500/10 text-teal-600 font-bold">
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-teal-500/10 text-teal-700 dark:text-teal-300 font-bold border border-teal-500/20">
                     {crit.markingType}
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-[11px] pt-1">
-                  <div className="p-1.5 rounded bg-white dark:bg-slate-900 border">উপস্থিত: {enToBnNumber(crit.presentMark)}</div>
-                  <div className="p-1.5 rounded bg-white dark:bg-slate-900 border">দেরি: {enToBnNumber(crit.lateMark)}</div>
-                  <div className="p-1.5 rounded bg-white dark:bg-slate-900 border">অনুপস্থিত: {enToBnNumber(crit.absentMark)}</div>
+                  <div className="p-2 rounded-lg bg-[var(--color-card)] border border-[var(--color-border-main)] text-center shadow-2xs">
+                    <span className="text-[10px] text-[var(--color-text-light)] block font-medium">উপস্থিত:</span>
+                    <span className="font-bold text-emerald-700 dark:text-emerald-300 text-xs font-mono">{enToBnNumber(crit.presentMark)}</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-[var(--color-card)] border border-[var(--color-border-main)] text-center shadow-2xs">
+                    <span className="text-[10px] text-[var(--color-text-light)] block font-medium">দেরি:</span>
+                    <span className="font-bold text-amber-700 dark:text-amber-300 text-xs font-mono">{enToBnNumber(crit.lateMark)}</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-[var(--color-card)] border border-[var(--color-border-main)] text-center shadow-2xs">
+                    <span className="text-[10px] text-[var(--color-text-light)] block font-medium">অনুপস্থিত:</span>
+                    <span className="font-bold text-rose-700 dark:text-rose-300 text-xs font-mono">{enToBnNumber(crit.absentMark)}</span>
+                  </div>
                 </div>
               </div>
             ))}
@@ -1145,11 +1157,11 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                 ) : (
                   auditLogs.map(log => (
                     <tr key={log.id} className="hover:bg-[var(--color-bg)]/50">
-                      <td className="p-3 font-mono text-[11px]">{log.modifiedAt.replace('T', ' ').slice(0, 19)}</td>
+                      <td className="p-3 font-mono text-[11px] text-[var(--color-text-light)]">{log.modifiedAt.replace('T', ' ').slice(0, 19)}</td>
                       <td className="p-3 font-bold text-[var(--color-text-main)]">{log.studentName}</td>
-                      <td className="p-3 font-medium text-teal-600">{log.modifiedBy}</td>
+                      <td className="p-3 font-medium text-teal-600 dark:text-teal-400">{log.modifiedBy}</td>
                       <td className="p-3 font-mono text-gray-500">{log.previousStatus || '—'}</td>
-                      <td className="p-3 font-bold text-emerald-600">{log.newStatus}</td>
+                      <td className="p-3 font-bold text-emerald-600 dark:text-emerald-400">{log.newStatus}</td>
                       <td className="p-3 text-[var(--color-text-main)]">{log.reason}</td>
                     </tr>
                   ))
@@ -1172,9 +1184,12 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* General & Window Settings */}
-            <div className="p-4 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] space-y-3">
-              <div className="font-bold text-xs text-[var(--color-text-main)]">সাধারণ হাজিরা উইন্ডো:</div>
-              <div>
+            <div className="p-5 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border-main)] space-y-4 shadow-xs">
+              <div className="font-bold text-xs text-[var(--color-text-main)] flex items-center gap-2">
+                <Clock size={16} className="text-teal-600" />
+                <span>সাধারণ হাজিরা উইন্ডো:</span>
+              </div>
+              <div className="space-y-1">
                 <label className="text-[11px] font-bold text-[var(--color-text-light)]">উইন্ডো শুরুর সময়:</label>
                 <input
                   type="time"
@@ -1183,10 +1198,10 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                     const updated = { ...settings, general: { ...settings.general, windowStart: e.target.value } };
                     setSettings(updated);
                   }}
-                  className="w-full p-2 rounded-lg bg-white dark:bg-slate-900 border text-xs font-mono"
+                  className="w-full p-2.5 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
                 />
               </div>
-              <div>
+              <div className="space-y-1">
                 <label className="text-[11px] font-bold text-[var(--color-text-light)]">উইন্ডো সমাপ্তির সময়:</label>
                 <input
                   type="time"
@@ -1195,10 +1210,10 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                     const updated = { ...settings, general: { ...settings.general, windowEnd: e.target.value } };
                     setSettings(updated);
                   }}
-                  className="w-full p-2 rounded-lg bg-white dark:bg-slate-900 border text-xs font-mono"
+                  className="w-full p-2.5 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
                 />
               </div>
-              <div>
+              <div className="space-y-1">
                 <label className="text-[11px] font-bold text-[var(--color-text-light)]">৩০ সেকেন্ড ডুপ্লিকেট পাঞ্চ ফিল্টার (সেকেন্ড):</label>
                 <input
                   type="number"
@@ -1207,15 +1222,18 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                     const updated = { ...settings, general: { ...settings.general, duplicateThresholdSeconds: Number(e.target.value) } };
                     setSettings(updated);
                   }}
-                  className="w-full p-2 rounded-lg bg-white dark:bg-slate-900 border text-xs font-mono"
+                  className="w-full p-2.5 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
                 />
               </div>
             </div>
 
             {/* Student Standard Times */}
-            <div className="p-4 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] space-y-3">
-              <div className="font-bold text-xs text-[var(--color-text-main)]">শিক্ষার্থী এন্ট্রি ও লেইট রুল:</div>
-              <div>
+            <div className="p-5 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border-main)] space-y-4 shadow-xs">
+              <div className="font-bold text-xs text-[var(--color-text-main)] flex items-center gap-2">
+                <Users size={16} className="text-teal-600" />
+                <span>শিক্ষার্থী এন্ট্রি ও লেইট রুল:</span>
+              </div>
+              <div className="space-y-1">
                 <label className="text-[11px] font-bold text-[var(--color-text-light)]">স্ট্যান্ডার্ড এন্ট্রি টাইম:</label>
                 <input
                   type="time"
@@ -1224,10 +1242,10 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                     const updated = { ...settings, student: { ...settings.student, standardEntry: e.target.value } };
                     setSettings(updated);
                   }}
-                  className="w-full p-2 rounded-lg bg-white dark:bg-slate-900 border text-xs font-mono"
+                  className="w-full p-2.5 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
                 />
               </div>
-              <div>
+              <div className="space-y-1">
                 <label className="text-[11px] font-bold text-[var(--color-text-light)]">অনুপস্থিতি সতর্কবার্তা (দিন):</label>
                 <input
                   type="number"
@@ -1236,10 +1254,10 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                     const updated = { ...settings, student: { ...settings.student, warningAbsenceDays: Number(e.target.value) } };
                     setSettings(updated);
                   }}
-                  className="w-full p-2 rounded-lg bg-white dark:bg-slate-900 border text-xs font-mono"
+                  className="w-full p-2.5 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
                 />
               </div>
-              <div>
+              <div className="space-y-1">
                 <label className="text-[11px] font-bold text-[var(--color-text-light)]">সাময়িক ভর্তি বাতিল সীমা (দিন):</label>
                 <input
                   type="number"
@@ -1248,7 +1266,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                     const updated = { ...settings, student: { ...settings.student, cancellationAbsenceDays: Number(e.target.value) } };
                     setSettings(updated);
                   }}
-                  className="w-full p-2 rounded-lg bg-white dark:bg-slate-900 border text-xs font-mono"
+                  className="w-full p-2.5 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
                 />
               </div>
             </div>
@@ -1259,11 +1277,24 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
               saveAttendanceSettings(settings);
               toast.success('হাজিরা সেটিংস সফলভাবে সংরক্ষিত হয়েছে!');
             }}
-            className="px-6 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-sm"
+            className="px-6 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-sm transition-all"
           >
             রুল ইঞ্জিন সেটিংস সংরক্ষণ করুন
           </button>
         </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* MODAL 0: INDIVIDUAL STUDENT ATTENDANCE & PUNCH REPORT MODAL */}
+      {/* ------------------------------------------------------------- */}
+      {selectedStudentForReport && (
+        <StudentAttendanceReportModal
+          student={selectedStudentForReport}
+          isOpen={!!selectedStudentForReport}
+          onClose={() => setSelectedStudentForReport(null)}
+          defaultDate={selectedDate}
+          madrasahBranding={madrasahBranding}
+        />
       )}
 
       {/* ------------------------------------------------------------- */}
@@ -1428,6 +1459,111 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                 </button>
                 <button
                   onClick={handleSaveManualAttendance}
+                  className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-sm"
+                >
+                  সংরক্ষণ করুন
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ------------------------------------------------------------- */}
+      {/* MODAL 2.5: CRITERIA EDIT / ADD MODAL */}
+      {/* ------------------------------------------------------------- */}
+      <AnimatePresence>
+        {showCriteriaModal && editingCriteria && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-[var(--color-card)] rounded-2xl border border-[var(--color-border-main)] max-w-md w-full p-6 shadow-2xl space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-[var(--color-border-main)] pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center font-bold">
+                    <Award size={18} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-[var(--color-text-main)]">
+                      হাজিরা মার্কিং ক্রাইটেরিয়া কনফিগারেশন
+                    </h3>
+                    <p className="text-[11px] text-[var(--color-text-light)]">
+                      জামাত ভিত্তিক উপস্থিতির নম্বর নির্ধারণ
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowCriteriaModal(false)}
+                  className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-bold text-[var(--color-text-main)] block mb-1">জামাত / শ্রেণী:</label>
+                  <input
+                    type="text"
+                    value={editingCriteria.class}
+                    onChange={(e) => setEditingCriteria({ ...editingCriteria, class: e.target.value })}
+                    className="w-full p-2.5 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-bold text-[var(--color-text-main)]"
+                    placeholder="যেমন: হিফজ বিভাগ / সব জামাত"
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 block mb-1">উপস্থিত মার্ক:</label>
+                    <input
+                      type="number"
+                      value={editingCriteria.presentMark}
+                      onChange={(e) => setEditingCriteria({ ...editingCriteria, presentMark: Number(e.target.value) })}
+                      className="w-full p-2 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] text-center"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-amber-700 dark:text-amber-300 block mb-1">দেরি মার্ক:</label>
+                    <input
+                      type="number"
+                      value={editingCriteria.lateMark}
+                      onChange={(e) => setEditingCriteria({ ...editingCriteria, lateMark: Number(e.target.value) })}
+                      className="w-full p-2 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] text-center"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-rose-700 dark:text-rose-300 block mb-1">অনুপস্থিত:</label>
+                    <input
+                      type="number"
+                      value={editingCriteria.absentMark}
+                      onChange={(e) => setEditingCriteria({ ...editingCriteria, absentMark: Number(e.target.value) })}
+                      className="w-full p-2 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] text-center"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[var(--color-border-main)]">
+                <button
+                  onClick={() => setShowCriteriaModal(false)}
+                  className="px-4 py-2 rounded-xl bg-[var(--color-bg)] text-xs font-bold text-[var(--color-text-main)]"
+                >
+                  বাতিল
+                </button>
+                <button
+                  onClick={() => {
+                    const exists = criteriaList.find(c => c.id === editingCriteria.id);
+                    const updated = exists 
+                      ? criteriaList.map(c => c.id === editingCriteria.id ? editingCriteria : c)
+                      : [...criteriaList, editingCriteria];
+                    setCriteriaList(updated);
+                    localStorage.setItem('madrasah_student_attendance_criteria', JSON.stringify(updated));
+                    setShowCriteriaModal(false);
+                    toast.success('ক্রাইটেরিয়া সফলভাবে সংরক্ষিত হয়েছে!');
+                  }}
                   className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-sm"
                 >
                   সংরক্ষণ করুন

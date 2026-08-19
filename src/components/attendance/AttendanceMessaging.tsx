@@ -338,12 +338,12 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
                         handleSaveSettings(updated);
                       }}
                       className={cn(
-                        "p-2 rounded-lg border text-left font-medium flex items-center justify-between",
-                        active ? "bg-white dark:bg-slate-900 border-amber-500/40 text-amber-900 dark:text-amber-300" : "bg-transparent border-transparent opacity-60"
+                        "p-2 rounded-lg border text-left font-medium flex items-center justify-between transition-all",
+                        active ? "bg-[var(--color-card)] border-amber-500/40 text-amber-900 dark:text-amber-300 shadow-2xs" : "bg-transparent border-transparent opacity-60 text-[var(--color-text-main)]"
                       )}
                     >
                       <span>{r.label}</span>
-                      <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", active ? "bg-amber-600 text-white" : "bg-gray-200 dark:bg-gray-700")}>
+                      <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", active ? "bg-amber-600 text-white" : "bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300")}>
                         {active ? "ON" : "OFF"}
                       </span>
                     </button>
@@ -383,12 +383,12 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
                         handleSaveSettings(updated);
                       }}
                       className={cn(
-                        "p-2 rounded-lg border text-left font-medium flex items-center justify-between",
-                        active ? "bg-white dark:bg-slate-900 border-blue-500/40 text-blue-900 dark:text-blue-300" : "bg-transparent border-transparent opacity-60"
+                        "p-2 rounded-lg border text-left font-medium flex items-center justify-between transition-all",
+                        active ? "bg-[var(--color-card)] border-blue-500/40 text-blue-900 dark:text-blue-300 shadow-2xs" : "bg-transparent border-transparent opacity-60 text-[var(--color-text-main)]"
                       )}
                     >
                       <span>{r.label}</span>
-                      <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", active ? "bg-blue-600 text-white" : "bg-gray-200 dark:bg-gray-700")}>
+                      <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded", active ? "bg-blue-600 text-white" : "bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300")}>
                         {active ? "ON" : "OFF"}
                       </span>
                     </button>
@@ -501,7 +501,7 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
                       };
                       setSettings(updated);
                     }}
-                    className="px-2 py-1 rounded bg-white dark:bg-slate-900 border border-teal-500/30 text-[10px] font-mono font-bold text-teal-700 dark:text-teal-300 hover:bg-teal-500/10"
+                    className="px-2.5 py-1 rounded-lg bg-[var(--color-card)] border border-teal-500/30 text-[10px] font-mono font-bold text-teal-700 dark:text-teal-300 hover:bg-teal-500/10 shadow-2xs"
                   >
                     {ph}
                   </button>

@@ -580,3 +580,465 @@ export const matchPunchesToStudents = (
     matchedDetails
   };
 };
+
+export interface MatchedStaffPunchResult {
+  id: string; // Teacher or Staff member ID
+  name: string;
+  type: 'teacher' | 'staff';
+  designation?: string;
+  department?: string;
+  mobile?: string;
+  firstInTime?: string;
+  lastOutTime?: string;
+  allPunches: Array<{ time: string; device?: string; type?: string; raw?: any }>;
+  status: 'present' | 'late' | 'absent' | 'leave' | 'weekly_off' | 'half-day' | 'on-duty';
+  lateMinutes: number;
+  workingHours: number;
+  overtimeHours: number;
+  deductionAmount: number;
+  isWeeklyOff: boolean;
+  rawPunches: TipsoiPunchRecord[];
+}
+
+/**
+ * Match Tipsoi Punch Logs specifically to Teachers and Staff according to their rules & settings.
+ */
+export const matchPunchesToStaffAndTeachers = (
+  punches: TipsoiPunchRecord[],
+  teachers: any[],
+  staffList: any[],
+  targetDate: string = new Date().toISOString().split('T')[0],
+  settings?: {
+    teacherRule?: {
+      standardInTime?: string;
+      standardOutTime?: string;
+      lateGraceMinutes?: number;
+      weeklyOffDay1?: string;
+      weeklyOffDay2?: string;
+      weeklyOffDay3?: string;
+      lateDeductionPerLate?: number;
+      dailySalaryDeductionPerAbsent?: number;
+    };
+    staffRule?: {
+      standardInTime?: string;
+      standardOutTime?: string;
+      lateGraceMinutes?: number;
+      weeklyOffDay1?: string;
+      weeklyOffDay2?: string;
+      lateDeductionPerLate?: number;
+      dailySalaryDeductionPerAbsent?: number;
+      minWorkingHoursForFullDay?: number;
+      minWorkingHoursForHalfDay?: number;
+      overtimeHourlyRate?: number;
+    };
+  },
+  approvedLeaveRequests: any[] = []
+): {
+  teacherResults: MatchedStaffPunchResult[];
+  staffResults: MatchedStaffPunchResult[];
+  unmatchedPunches: TipsoiPunchRecord[];
+  summary: {
+    totalPunches: number;
+    totalTeachers: number;
+    teachersPresent: number;
+    teachersLate: number;
+    teachersAbsent: number;
+    totalStaff: number;
+    staffPresent: number;
+    staffLate: number;
+    staffAbsent: number;
+  };
+} => {
+  const teacherRule = {
+    standardInTime: '08:00',
+    standardOutTime: '16:30',
+    lateGraceMinutes: 15,
+    weeklyOffDay1: 'Friday',
+    weeklyOffDay2: 'Tuesday',
+    weeklyOffDay3: 'Thursday',
+    lateDeductionPerLate: 100,
+    dailySalaryDeductionPerAbsent: 600,
+    ...(settings?.teacherRule || {})
+  };
+
+  const staffRule = {
+    standardInTime: '08:30',
+    standardOutTime: '17:00',
+    lateGraceMinutes: 15,
+    weeklyOffDay1: 'Friday',
+    weeklyOffDay2: 'Saturday',
+    lateDeductionPerLate: 100,
+    dailySalaryDeductionPerAbsent: 500,
+    minWorkingHoursForFullDay: 7,
+    minWorkingHoursForHalfDay: 4,
+    overtimeHourlyRate: 100,
+    ...(settings?.staffRule || {})
+  };
+
+  // Day of week calculation
+  const dObj = new Date(targetDate);
+  const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const dayOfWeek = daysOfWeek[dObj.getDay()] || 'Friday';
+
+  // Build index maps for Teachers and Staff
+  const personMapById = new Map<string, { person: any; type: 'teacher' | 'staff' }>();
+  const personMapByMobile = new Map<string, { person: any; type: 'teacher' | 'staff' }>();
+  const personMapByName = new Map<string, { person: any; type: 'teacher' | 'staff' }>();
+  const personMapByCard = new Map<string, { person: any; type: 'teacher' | 'staff' }>();
+
+  teachers.forEach(t => {
+    const id = String(t.id || t.mobile || '').trim();
+    const cleanId = normalizeIdentifier(id);
+    const name = normalizeIdentifier(t.name || '');
+    const mobile = String(t.mobile || '').replace(/[^0-9]/g, '');
+    const card = normalizeIdentifier(t.card_no || t.rfid || '');
+
+    if (cleanId) personMapById.set(cleanId, { person: t, type: 'teacher' });
+    if (mobile) personMapByMobile.set(mobile, { person: t, type: 'teacher' });
+    if (name) personMapByName.set(name, { person: t, type: 'teacher' });
+    if (card) personMapByCard.set(card, { person: t, type: 'teacher' });
+  });
+
+  staffList.forEach(s => {
+    const id = String(s.id || s.mobile || '').trim();
+    const cleanId = normalizeIdentifier(id);
+    const name = normalizeIdentifier(s.name || '');
+    const mobile = String(s.mobile || '').replace(/[^0-9]/g, '');
+    const card = normalizeIdentifier(s.card_no || s.rfid || '');
+
+    if (cleanId) personMapById.set(cleanId, { person: s, type: 'staff' });
+    if (mobile) personMapByMobile.set(mobile, { person: s, type: 'staff' });
+    if (name) personMapByName.set(name, { person: s, type: 'staff' });
+    if (card) personMapByCard.set(card, { person: s, type: 'staff' });
+  });
+
+  // Group punches by matched person
+  const punchesByPerson = new Map<string, { person: any; type: 'teacher' | 'staff'; punches: TipsoiPunchRecord[] }>();
+  const unmatchedPunches: TipsoiPunchRecord[] = [];
+
+  punches.forEach(punch => {
+    const candidateTokens: string[] = [];
+    const rawFields = [
+      punch.person_identifier,
+      punch.identifier,
+      punch.emp_id,
+      punch.employee_id,
+      punch.user_id,
+      punch.card_no,
+      punch.rfid,
+      punch.name,
+      punch.primary_display_text,
+      punch.secondary_display_text,
+    ];
+
+    rawFields.forEach(f => {
+      if (f !== null && f !== undefined && f !== '') {
+        const str = String(f).trim();
+        candidateTokens.push(str);
+        if (str.includes('-') || str.includes('_') || str.includes(' ')) {
+          str.split(/[-_\s]+/).forEach(p => { if (p.trim()) candidateTokens.push(p.trim()); });
+        }
+      }
+    });
+
+    let matched: { person: any; type: 'teacher' | 'staff' } | null = null;
+
+    for (const token of candidateTokens) {
+      const normalized = normalizeIdentifier(token);
+      if (!normalized) continue;
+
+      if (personMapById.has(normalized)) {
+        matched = personMapById.get(normalized)!;
+        break;
+      }
+      if (personMapByCard.has(normalized)) {
+        matched = personMapByCard.get(normalized)!;
+        break;
+      }
+      const cleanNum = token.replace(/[^0-9]/g, '');
+      if (cleanNum.length >= 10 && personMapByMobile.has(cleanNum)) {
+        matched = personMapByMobile.get(cleanNum)!;
+        break;
+      }
+      if (personMapByName.has(normalized)) {
+        matched = personMapByName.get(normalized)!;
+        break;
+      }
+    }
+
+    if (matched) {
+      const pId = String(matched.person.id || matched.person.mobile || matched.person.name);
+      if (!punchesByPerson.has(pId)) {
+        punchesByPerson.set(pId, { person: matched.person, type: matched.type, punches: [] });
+      }
+      punchesByPerson.get(pId)!.punches.push(punch);
+    } else {
+      unmatchedPunches.push(punch);
+    }
+  });
+
+  // Helper to parse time string
+  const extractHHMM = (rawTime: string): { hhmm: string; ms: number } => {
+    let hhmm = '08:00';
+    let ms = 0;
+    if (!rawTime) return { hhmm, ms };
+    try {
+      if (rawTime.includes(' ')) {
+        hhmm = rawTime.split(' ')[1].slice(0, 5);
+        ms = new Date(rawTime.replace(' ', 'T')).getTime();
+      } else if (rawTime.includes('T')) {
+        hhmm = rawTime.split('T')[1].slice(0, 5);
+        ms = new Date(rawTime).getTime();
+      } else if (rawTime.includes(':')) {
+        hhmm = rawTime.slice(0, 5);
+      }
+    } catch {}
+    return { hhmm, ms };
+  };
+
+  // Process Teachers
+  const teacherResults: MatchedStaffPunchResult[] = teachers.map(t => {
+    const tId = String(t.id || t.mobile || t.name);
+    const pData = punchesByPerson.get(tId);
+    const personPunches = pData?.punches || [];
+
+    const isWeeklyOff = (
+      teacherRule.weeklyOffDay1 === dayOfWeek ||
+      teacherRule.weeklyOffDay2 === dayOfWeek ||
+      teacherRule.weeklyOffDay3 === dayOfWeek
+    );
+
+    // Sort punches chronologically
+    const allPunchesWithTime = personPunches.map(p => {
+      const raw = p.logged_time || p.punch_time || p.time || p.sync_time || '';
+      const { hhmm, ms } = extractHHMM(raw);
+      return { time: hhmm, ms, device: p.device_name || 'টিপসই ডিভাইস', type: p.punch_type || 'fingerprint', raw: p };
+    }).sort((a, b) => a.ms - b.ms);
+
+    if (allPunchesWithTime.length === 0) {
+      // No punch today
+      if (isWeeklyOff) {
+        return {
+          id: tId,
+          name: t.name,
+          type: 'teacher',
+          designation: t.designation || 'ওস্তাদ/শিক্ষক',
+          department: t.department || 'শিক্ষা বিভাগ',
+          mobile: t.mobile,
+          allPunches: [],
+          status: 'weekly_off',
+          lateMinutes: 0,
+          workingHours: 0,
+          overtimeHours: 0,
+          deductionAmount: 0,
+          isWeeklyOff: true,
+          rawPunches: []
+        };
+      }
+
+      return {
+        id: tId,
+        name: t.name,
+        type: 'teacher',
+        designation: t.designation || 'ওস্তাদ/শিক্ষক',
+        department: t.department || 'শিক্ষা বিভাগ',
+        mobile: t.mobile,
+        allPunches: [],
+        status: 'absent',
+        lateMinutes: 0,
+        workingHours: 0,
+        overtimeHours: 0,
+        deductionAmount: teacherRule.dailySalaryDeductionPerAbsent || 600,
+        isWeeklyOff: false,
+        rawPunches: []
+      };
+    }
+
+    // Has punches!
+    const firstIn = allPunchesWithTime[0].time;
+    const lastOut = allPunchesWithTime.length > 1 ? allPunchesWithTime[allPunchesWithTime.length - 1].time : teacherRule.standardOutTime;
+
+    // Calculate working hours
+    const [inH, inM] = firstIn.split(':').map(Number);
+    const [outH, outM] = lastOut.split(':').map(Number);
+    let diffMins = (outH * 60 + outM) - (inH * 60 + inM);
+    if (diffMins < 0) diffMins += 24 * 60;
+    const workingHours = Number((diffMins / 60).toFixed(2));
+    const overtimeHours = Math.max(0, Number((workingHours - 8).toFixed(2)));
+
+    // Late calculation for Teacher: standardInTime + graceMinutes (e.g. 08:00 + 15 = 08:15)
+    const [stdH, stdM] = teacherRule.standardInTime.split(':').map(Number);
+    const graceLimitMins = stdH * 60 + stdM + teacherRule.lateGraceMinutes;
+    const actualInMins = inH * 60 + inM;
+    const lateMinutes = Math.max(0, actualInMins - (stdH * 60 + stdM));
+    const isLate = actualInMins > graceLimitMins;
+
+    const status: 'present' | 'late' | 'half-day' = 
+      workingHours < 4 ? 'half-day' :
+      isLate ? 'late' : 'present';
+
+    const deductionAmount = isLate ? (teacherRule.lateDeductionPerLate || 100) : 0;
+
+    return {
+      id: tId,
+      name: t.name,
+      type: 'teacher',
+      designation: t.designation || 'ওস্তাদ/শিক্ষক',
+      department: t.department || 'শিক্ষা বিভাগ',
+      mobile: t.mobile,
+      firstInTime: firstIn,
+      lastOutTime: lastOut,
+      allPunches: allPunchesWithTime,
+      status,
+      lateMinutes,
+      workingHours,
+      overtimeHours,
+      deductionAmount,
+      isWeeklyOff,
+      rawPunches: personPunches
+    };
+  });
+
+  // Process Staff
+  const staffResults: MatchedStaffPunchResult[] = staffList.map(s => {
+    const sId = String(s.id || s.mobile || s.name);
+    const pData = punchesByPerson.get(sId);
+    const personPunches = pData?.punches || [];
+
+    const isWeeklyOff = (
+      staffRule.weeklyOffDay1 === dayOfWeek ||
+      staffRule.weeklyOffDay2 === dayOfWeek
+    );
+
+    // Check if on approved leave
+    const hasApprovedLeave = approvedLeaveRequests.some(l => 
+      l.staffId === sId && 
+      l.status === 'approved' &&
+      targetDate >= l.startDate &&
+      targetDate <= l.endDate
+    );
+
+    const allPunchesWithTime = personPunches.map(p => {
+      const raw = p.logged_time || p.punch_time || p.time || p.sync_time || '';
+      const { hhmm, ms } = extractHHMM(raw);
+      return { time: hhmm, ms, device: p.device_name || 'টিপসই ডিভাইস', type: p.punch_type || 'fingerprint', raw: p };
+    }).sort((a, b) => a.ms - b.ms);
+
+    if (hasApprovedLeave) {
+      return {
+        id: sId,
+        name: s.name,
+        type: 'staff',
+        designation: s.designation || 'কর্মচারী',
+        department: s.department || 'সাধারণ প্রশাসন',
+        mobile: s.mobile,
+        allPunches: allPunchesWithTime,
+        status: 'leave',
+        lateMinutes: 0,
+        workingHours: 0,
+        overtimeHours: 0,
+        deductionAmount: 0,
+        isWeeklyOff: false,
+        rawPunches: personPunches
+      };
+    }
+
+    if (allPunchesWithTime.length === 0) {
+      if (isWeeklyOff) {
+        return {
+          id: sId,
+          name: s.name,
+          type: 'staff',
+          designation: s.designation || 'কর্মচারী',
+          department: s.department || 'সাধারণ প্রশাসন',
+          mobile: s.mobile,
+          allPunches: [],
+          status: 'weekly_off',
+          lateMinutes: 0,
+          workingHours: 0,
+          overtimeHours: 0,
+          deductionAmount: 0,
+          isWeeklyOff: true,
+          rawPunches: []
+        };
+      }
+
+      return {
+        id: sId,
+        name: s.name,
+        type: 'staff',
+        designation: s.designation || 'কর্মচারী',
+        department: s.department || 'সাধারণ প্রশাসন',
+        mobile: s.mobile,
+        allPunches: [],
+        status: 'absent',
+        lateMinutes: 0,
+        workingHours: 0,
+        overtimeHours: 0,
+        deductionAmount: staffRule.dailySalaryDeductionPerAbsent || 500,
+        isWeeklyOff: false,
+        rawPunches: []
+      };
+    }
+
+    // Has Punches!
+    const firstIn = allPunchesWithTime[0].time;
+    const lastOut = allPunchesWithTime.length > 1 ? allPunchesWithTime[allPunchesWithTime.length - 1].time : staffRule.standardOutTime;
+
+    const [inH, inM] = firstIn.split(':').map(Number);
+    const [outH, outM] = lastOut.split(':').map(Number);
+    let diffMins = (outH * 60 + outM) - (inH * 60 + inM);
+    if (diffMins < 0) diffMins += 24 * 60;
+    const workingHours = Number((diffMins / 60).toFixed(2));
+    const overtimeHours = Math.max(0, Number((workingHours - 8).toFixed(2)));
+
+    // Late calculation for Staff: standardInTime + graceMinutes (e.g. 08:30 + 15 = 08:45)
+    const [stdH, stdM] = staffRule.standardInTime.split(':').map(Number);
+    const graceLimitMins = stdH * 60 + stdM + staffRule.lateGraceMinutes;
+    const actualInMins = inH * 60 + inM;
+    const lateMinutes = Math.max(0, actualInMins - (stdH * 60 + stdM));
+    const isLate = actualInMins > graceLimitMins;
+
+    const status: 'present' | 'late' | 'half-day' = 
+      workingHours < staffRule.minWorkingHoursForHalfDay ? 'half-day' :
+      isLate ? 'late' : 'present';
+
+    const deductionAmount = isLate ? (staffRule.lateDeductionPerLate || 100) : 0;
+
+    return {
+      id: sId,
+      name: s.name,
+      type: 'staff',
+      designation: s.designation || 'কর্মচারী',
+      department: s.department || 'সাধারণ প্রশাসন',
+      mobile: s.mobile,
+      firstInTime: firstIn,
+      lastOutTime: lastOut,
+      allPunches: allPunchesWithTime,
+      status,
+      lateMinutes,
+      workingHours,
+      overtimeHours,
+      deductionAmount,
+      isWeeklyOff,
+      rawPunches: personPunches
+    };
+  });
+
+  return {
+    teacherResults,
+    staffResults,
+    unmatchedPunches,
+    summary: {
+      totalPunches: punches.length,
+      totalTeachers: teacherResults.length,
+      teachersPresent: teacherResults.filter(t => t.status === 'present').length,
+      teachersLate: teacherResults.filter(t => t.status === 'late').length,
+      teachersAbsent: teacherResults.filter(t => t.status === 'absent').length,
+      totalStaff: staffResults.length,
+      staffPresent: staffResults.filter(s => s.status === 'present').length,
+      staffLate: staffResults.filter(s => s.status === 'late').length,
+      staffAbsent: staffResults.filter(s => s.status === 'absent').length,
+    }
+  };
+};

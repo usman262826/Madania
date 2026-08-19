@@ -27,7 +27,9 @@ import {
   Building,
   Eye,
   Check,
-  RefreshCw
+  RefreshCw,
+  Radio,
+  ShieldCheck
 } from 'lucide-react';
 import { 
   TeacherAttendanceRecord, 
@@ -38,6 +40,9 @@ import {
 import { useData } from '../../contexts/DataContext';
 import { enToBnNumber, cn, formatDateToDDMMYYYY } from '../../lib/utils';
 import { calculateWorkingHours, calculateTeacherSalary } from '../../utils/attendanceCalculators';
+import { subscribeToAttendanceUpdates } from '../../services/attendanceEngine';
+import { TipsoiSyncModal } from './TipsoiSyncModal';
+import { TeacherStaffAttendanceReportModal } from './TeacherStaffAttendanceReportModal';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
@@ -45,6 +50,8 @@ import toast from 'react-hot-toast';
 export const TeacherAttendance: React.FC = () => {
   const { staffMembers, teachers, madrasahBranding } = useData();
   const [activeTab, setActiveTab] = useState<'daily' | 'rules' | 'salary_gen' | 'biometric'>('daily');
+  const [showTipsoiModal, setShowTipsoiModal] = useState(false);
+  const [viewingTeacher, setViewingTeacher] = useState<any>(null);
 
   // Master Teacher List from Staff + Teachers
   const teacherList = useMemo(() => {
@@ -119,9 +126,31 @@ export const TeacherAttendance: React.FC = () => {
     return [];
   });
 
+  const reloadTeacherAttendance = () => {
+    const saved = localStorage.getItem('madrasah_teacher_attendance_records');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) setAttendanceRecords(parsed);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  };
+
   useEffect(() => {
     localStorage.setItem('madrasah_teacher_attendance_records', JSON.stringify(attendanceRecords));
   }, [attendanceRecords]);
+
+  // Subscribe to real-time attendance engine events
+  useEffect(() => {
+    const unsubscribe = subscribeToAttendanceUpdates(() => {
+      reloadTeacherAttendance();
+    });
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, []);
 
   // -------------------------------------------------------------
   // SALARY RULES STATE
@@ -427,6 +456,40 @@ export const TeacherAttendance: React.FC = () => {
       {/* ========================================================================= */}
       {activeTab === 'daily' && (
         <div className="space-y-6">
+          {/* Real-time Attendance Summary Stats */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <div className="p-4 bg-card border border-border-main rounded-2xl">
+              <span className="text-[10px] font-black text-text-light/60 uppercase block">মোট শিক্ষক</span>
+              <span className="text-xl font-black text-text-main mt-0.5 block">
+                {enToBnNumber(teacherList.length)} জন
+              </span>
+            </div>
+            <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl">
+              <span className="text-[10px] font-black text-emerald-600 uppercase block">উপস্থিত</span>
+              <span className="text-xl font-black text-emerald-600 mt-0.5 block">
+                {enToBnNumber(teacherList.filter(t => dayRecordsMap[t.id]?.status === 'present').length)} জন
+              </span>
+            </div>
+            <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl">
+              <span className="text-[10px] font-black text-amber-600 uppercase block">দেরিতে উপস্থিত</span>
+              <span className="text-xl font-black text-amber-600 mt-0.5 block">
+                {enToBnNumber(teacherList.filter(t => dayRecordsMap[t.id]?.status === 'late').length)} জন
+              </span>
+            </div>
+            <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl">
+              <span className="text-[10px] font-black text-rose-600 uppercase block">অনুপস্থিত</span>
+              <span className="text-xl font-black text-rose-600 mt-0.5 block">
+                {enToBnNumber(teacherList.filter(t => dayRecordsMap[t.id]?.status === 'absent').length)} জন
+              </span>
+            </div>
+            <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl col-span-2 sm:col-span-1">
+              <span className="text-[10px] font-black text-blue-600 uppercase block">অন-ডিউটি / ছুটি</span>
+              <span className="text-xl font-black text-blue-600 mt-0.5 block">
+                {enToBnNumber(teacherList.filter(t => dayRecordsMap[t.id]?.status === 'leave' || dayRecordsMap[t.id]?.status === 'on-duty').length)} জন
+              </span>
+            </div>
+          </div>
+
           {/* Controls Bar */}
           <div className="bento-card p-5 bg-card border border-border-main rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div className="flex flex-wrap items-center gap-3">
@@ -440,19 +503,29 @@ export const TeacherAttendance: React.FC = () => {
                 />
               </div>
 
+              {/* Tipsoi Biometric Sync Button */}
+              <button
+                type="button"
+                onClick={() => setShowTipsoiModal(true)}
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs flex items-center gap-2 cursor-pointer shadow-md shadow-emerald-600/20 active:scale-95 transition-all"
+              >
+                <Radio size={15} className="animate-pulse" />
+                <span>টিপসই রিয়েল-টাইম সিঙ্ক</span>
+              </button>
+
               <button
                 onClick={() => handleBulkTeacherAttendance('present')}
-                className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                className="px-3.5 py-2.5 bg-card hover:bg-step-bg border border-border-main text-text-main rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
-                <CheckCircle2 size={15} />
+                <CheckCircle2 size={15} className="text-emerald-600" />
                 <span>সবাই উপস্থিত</span>
               </button>
 
               <button
                 onClick={() => handleBulkTeacherAttendance('absent')}
-                className="px-3.5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                className="px-3.5 py-2.5 bg-card hover:bg-step-bg border border-border-main text-text-main rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
-                <XCircle size={15} />
+                <XCircle size={15} className="text-rose-600" />
                 <span>সবাই অনুপস্থিত</span>
               </button>
             </div>
@@ -498,8 +571,19 @@ export const TeacherAttendance: React.FC = () => {
                           {teacher.name.charAt(0)}
                         </div>
                         <div>
-                          <h4 className="font-black text-sm text-text-main">{teacher.name}</h4>
-                          <p className="text-[11px] text-text-light/60 font-bold">
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-black text-sm text-text-main">{teacher.name}</h4>
+                            <button
+                              type="button"
+                              onClick={() => setViewingTeacher({ ...teacher, type: 'teacher' })}
+                              className="px-2 py-0.5 bg-primary/10 hover:bg-primary/20 text-primary text-[10px] font-black rounded-md flex items-center gap-1 cursor-pointer transition-colors"
+                              title="ব্যক্তিগত বিস্তারিত রিপোর্ট"
+                            >
+                              <Eye size={11} />
+                              <span>ভিউ</span>
+                            </button>
+                          </div>
+                          <p className="text-[11px] text-text-light/60 font-bold mt-0.5">
                             {teacher.designation} • {teacher.department}
                           </p>
                         </div>
@@ -1256,6 +1340,30 @@ export const TeacherAttendance: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Tipsoi Real-time Biometric Sync Modal */}
+      {showTipsoiModal && (
+        <TipsoiSyncModal
+          isOpen={showTipsoiModal}
+          onClose={() => setShowTipsoiModal(false)}
+          selectedDate={selectedDate}
+          teachers={teachers}
+          staffMembers={staffMembers}
+          defaultScope="teachers"
+        />
+      )}
+
+      {/* Teacher Attendance & Punch Report Modal */}
+      {viewingTeacher && (
+        <TeacherStaffAttendanceReportModal
+          isOpen={!!viewingTeacher}
+          onClose={() => setViewingTeacher(null)}
+          person={viewingTeacher}
+          selectedDate={selectedDate}
+          allRecords={attendanceRecords}
+          madrasahBranding={madrasahBranding}
+        />
+      )}
     </div>
   );
 };

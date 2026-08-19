@@ -173,6 +173,18 @@ export interface AttendanceSettings {
     dailySalaryDeductionPerAbsent: number; // 600
     earlyExitDeduction: number; // 150
   };
+  staffRule: {
+    weeklyOffDay1: string; // "Friday"
+    weeklyOffDay2: string; // "Saturday" or other
+    standardInTime: string; // "08:30"
+    standardOutTime: string; // "17:00"
+    lateGraceMinutes: number; // 15
+    lateDeductionPerLate: number; // 100
+    dailySalaryDeductionPerAbsent: number; // 500
+    overtimeHourlyRate: number; // 100
+    minWorkingHoursForFullDay: number; // 7
+    minWorkingHoursForHalfDay: number; // 4
+  };
   messaging: {
     enabled: boolean;
     smsProvider: 'mock_gateway' | 'greenweb' | 'bulk_sms_bd' | 'custom_api';
@@ -473,6 +485,18 @@ export const DEFAULT_ATTENDANCE_SETTINGS: AttendanceSettings = {
     lateDeductionPerLate: 100,
     dailySalaryDeductionPerAbsent: 600,
     earlyExitDeduction: 150,
+  },
+  staffRule: {
+    weeklyOffDay1: 'Friday',
+    weeklyOffDay2: 'Saturday',
+    standardInTime: '08:30',
+    standardOutTime: '17:00',
+    lateGraceMinutes: 15,
+    lateDeductionPerLate: 100,
+    dailySalaryDeductionPerAbsent: 500,
+    overtimeHourlyRate: 100,
+    minWorkingHoursForFullDay: 7,
+    minWorkingHoursForHalfDay: 4,
   },
   messaging: {
     enabled: true,

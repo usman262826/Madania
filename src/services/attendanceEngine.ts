@@ -5,11 +5,20 @@ import {
   AttendanceSettings, 
   SentMessageLog, 
   AttendanceAuditLog, 
+  TeacherAttendanceRecord,
+  StaffAttendanceRecord,
+  StaffLeaveRequest,
   DEFAULT_ATTENDANCE_SETTINGS 
 } from '../types/attendance';
 import { Student } from '../types';
 import { enToBnNumber } from '../lib/utils';
-import { fetchTipsoiAttendanceLogs, TipsoiPunchRecord, normalizeIdentifier } from './tipsoiAttendanceService';
+import { 
+  fetchTipsoiAttendanceLogs, 
+  TipsoiPunchRecord, 
+  normalizeIdentifier, 
+  matchPunchesToStaffAndTeachers,
+  MatchedStaffPunchResult
+} from './tipsoiAttendanceService';
 
 // Storage keys
 export const STORAGE_KEYS = {
@@ -22,6 +31,10 @@ export const STORAGE_KEYS = {
   AUDIT_LOGS: 'madrasah_attendance_audit_logs_v3',
   LAST_SYNC_INFO: 'madrasah_tipsoi_last_sync_info_v3',
   CANCELLED_STUDENTS: 'madrasah_cancelled_students_v3',
+  TEACHER_ATTENDANCE: 'madrasah_teacher_attendance_records',
+  TEACHER_SALARY_RULES: 'madrasah_teacher_salary_rules',
+  STAFF_ATTENDANCE: 'madrasah_staff_attendance_records',
+  STAFF_LEAVE_REQUESTS: 'madrasah_staff_leave_requests',
 };
 
 // Event Emitter for real-time live React UI updates
@@ -61,6 +74,7 @@ export const getAttendanceSettings = (): AttendanceSettings => {
         residentialSchedule: { ...DEFAULT_ATTENDANCE_SETTINGS.residentialSchedule, ...(parsed.residentialSchedule || {}) },
         nonResidentialSchedule: { ...DEFAULT_ATTENDANCE_SETTINGS.nonResidentialSchedule, ...(parsed.nonResidentialSchedule || {}) },
         teacherRule: { ...DEFAULT_ATTENDANCE_SETTINGS.teacherRule, ...(parsed.teacherRule || {}) },
+        staffRule: { ...DEFAULT_ATTENDANCE_SETTINGS.staffRule, ...(parsed.staffRule || {}) },
         messaging: { ...DEFAULT_ATTENDANCE_SETTINGS.messaging, ...(parsed.messaging || {}) },
       };
     }
@@ -616,12 +630,14 @@ export const calculateConsecutiveAbsence = (
 };
 
 // -------------------------------------------------------------
-// REAL-TIME AUTO SYNC & POLLING SERVICE
+// REAL-TIME AUTO SYNC & POLLING SERVICE FOR STUDENTS, TEACHERS & STAFF
 // -------------------------------------------------------------
 let syncTimer: any = null;
 
 export const startAttendanceAutoSync = (
   studentsProvider: () => Student[],
+  teachersProvider?: () => any[],
+  staffProvider?: () => any[],
   intervalSeconds?: number
 ) => {
   if (syncTimer) clearInterval(syncTimer);
@@ -632,8 +648,9 @@ export const startAttendanceAutoSync = (
   const performSync = async () => {
     try {
       const today = new Date().toISOString().split('T')[0];
-      const students = studentsProvider();
-      if (!students || students.length === 0) return;
+      const students = studentsProvider ? studentsProvider() : [];
+      const teachers = teachersProvider ? teachersProvider() : [];
+      const staffList = staffProvider ? staffProvider() : [];
 
       const { punches } = await fetchTipsoiAttendanceLogs(today);
       if (punches && punches.length > 0) {
@@ -667,8 +684,15 @@ export const startAttendanceAutoSync = (
           }
         });
 
-        // Run Processing Engine
-        processAttendanceEngine(rawExisting, students, today, settings);
+        // 1. Run Processing Engine for Students
+        if (students && students.length > 0) {
+          processAttendanceEngine(rawExisting, students, today, settings);
+        }
+
+        // 2. Run Processing Engine for Teachers & Staff
+        if ((teachers && teachers.length > 0) || (staffList && staffList.length > 0)) {
+          processStaffAndTeacherAttendanceEngine(punches, teachers, staffList, today, settings);
+        }
 
         updateSyncStatusInfo({
           connected: true,
@@ -704,6 +728,107 @@ export const stopAttendanceAutoSync = () => {
   if (syncTimer) {
     clearInterval(syncTimer);
     syncTimer = null;
+  }
+};
+
+/**
+ * One-click unified sync function for a specific date across Students, Teachers, and Staff
+ */
+export const syncAllAttendanceForDate = async (
+  date: string,
+  students: Student[] = [],
+  teachers: any[] = [],
+  staffList: any[] = [],
+  settings: AttendanceSettings = getAttendanceSettings()
+): Promise<{
+  success: boolean;
+  totalPunches: number;
+  studentMatched: number;
+  teacherMatched: number;
+  staffMatched: number;
+  error?: string;
+}> => {
+  try {
+    const { punches } = await fetchTipsoiAttendanceLogs(date);
+    if (!punches || punches.length === 0) {
+      return {
+        success: true,
+        totalPunches: 0,
+        studentMatched: 0,
+        teacherMatched: 0,
+        staffMatched: 0
+      };
+    }
+
+    // Ingest into Raw Layer
+    const rawExisting = getRawPunches();
+    const existingIds = new Set(rawExisting.map(r => `${r.userId}_${r.punchTime}`));
+
+    punches.forEach(p => {
+      const punchTime = p.logged_time || p.punch_time || p.time || p.sync_time || '';
+      const userId = String(p.person_identifier || p.identifier || p.emp_id || p.user_id || p.card_no || '').trim();
+      const key = `${userId}_${punchTime}`;
+
+      if (!existingIds.has(key)) {
+        existingIds.add(key);
+        rawExisting.push({
+          id: `raw_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+          deviceId: String(p.device_identifier || 'TIPSOI-01'),
+          deviceName: p.device_name || 'টিপসই স্মার্ট ডিভাইস',
+          userId,
+          userType: 'student',
+          punchTime: punchTime || `${date} 08:00:00`,
+          loggedTime: p.logged_time,
+          syncTime: p.sync_time,
+          receivedTime: new Date().toISOString(),
+          punchType: p.punch_type || 'fingerprint',
+          rawApiData: p.raw || p,
+          processingStatus: 'processed',
+        });
+      }
+    });
+
+    let studentMatchedCount = 0;
+    if (students.length > 0) {
+      const studentEngineResult = processAttendanceEngine(rawExisting, students, date, settings);
+      studentMatchedCount = Object.values(studentEngineResult.processedDailyRecords).filter(r => r.status === 'present' || r.status === 'late').length;
+    }
+
+    let teacherMatchedCount = 0;
+    let staffMatchedCount = 0;
+    if (teachers.length > 0 || staffList.length > 0) {
+      const staffEngineResult = processStaffAndTeacherAttendanceEngine(punches, teachers, staffList, date, settings);
+      teacherMatchedCount = staffEngineResult.teacherSummary.present + staffEngineResult.teacherSummary.late;
+      staffMatchedCount = staffEngineResult.staffSummary.present + staffEngineResult.staffSummary.late;
+    }
+
+    updateSyncStatusInfo({
+      connected: true,
+      lastSyncTime: new Date().toISOString(),
+      lastReceivedPunchTime: punches[punches.length - 1]?.punch_time || new Date().toISOString(),
+      totalPunchesToday: punches.length,
+      lastError: null,
+    });
+
+    notifyAttendanceUpdate();
+
+    return {
+      success: true,
+      totalPunches: punches.length,
+      studentMatched: studentMatchedCount,
+      teacherMatched: teacherMatchedCount,
+      staffMatched: staffMatchedCount
+    };
+  } catch (err: any) {
+    console.error('Unified Tipsoi sync error:', err);
+    return {
+      success: false,
+      totalPunches: 0,
+      studentMatched: 0,
+      teacherMatched: 0,
+      staffMatched: 0,
+      error: err?.message || 'টিপসই সিঙ্কে ত্রুটি'
+    };
   }
 };
 
@@ -959,5 +1084,203 @@ export const addSmsBundle = (addedCredits: number) => {
   const updatedTotal = (current.totalPurchased || 5000) + addedCredits;
   localStorage.setItem(STORAGE_KEYS.SMS_BUNDLE, JSON.stringify({ totalPurchased: updatedTotal }));
   notifyAttendanceUpdate();
+};
+
+// -------------------------------------------------------------
+// TEACHER ATTENDANCE DB LAYER
+// -------------------------------------------------------------
+export const getTeacherAttendanceDb = (): TeacherAttendanceRecord[] => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEYS.TEACHER_ATTENDANCE);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.error('Error reading teacher attendance db:', e);
+  }
+  return [];
+};
+
+export const saveTeacherAttendanceDb = (records: TeacherAttendanceRecord[]) => {
+  localStorage.setItem(STORAGE_KEYS.TEACHER_ATTENDANCE, JSON.stringify(records));
+  notifyAttendanceUpdate();
+};
+
+// -------------------------------------------------------------
+// STAFF ATTENDANCE DB LAYER
+// -------------------------------------------------------------
+export const getStaffAttendanceDb = (): StaffAttendanceRecord[] => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEYS.STAFF_ATTENDANCE);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.error('Error reading staff attendance db:', e);
+  }
+  return [];
+};
+
+export const saveStaffAttendanceDb = (records: StaffAttendanceRecord[]) => {
+  localStorage.setItem(STORAGE_KEYS.STAFF_ATTENDANCE, JSON.stringify(records));
+  notifyAttendanceUpdate();
+};
+
+// -------------------------------------------------------------
+// STAFF LEAVE REQUESTS LAYER
+// -------------------------------------------------------------
+export const getStaffLeaveRequestsDb = (): StaffLeaveRequest[] => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEYS.STAFF_LEAVE_REQUESTS);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.error('Error reading staff leave requests:', e);
+  }
+  return [];
+};
+
+export const saveStaffLeaveRequestsDb = (requests: StaffLeaveRequest[]) => {
+  localStorage.setItem(STORAGE_KEYS.STAFF_LEAVE_REQUESTS, JSON.stringify(requests));
+  notifyAttendanceUpdate();
+};
+
+// -------------------------------------------------------------
+// REAL-TIME TEACHER & STAFF BIOMETRIC ATTENDANCE PROCESSOR
+// -------------------------------------------------------------
+export const processStaffAndTeacherAttendanceEngine = (
+  rawPunches: TipsoiPunchRecord[],
+  teachers: any[],
+  staffList: any[],
+  targetDate: string = new Date().toISOString().split('T')[0],
+  settings: AttendanceSettings = getAttendanceSettings(),
+  leaveRequests: StaffLeaveRequest[] = getStaffLeaveRequestsDb()
+): {
+  teacherRecords: TeacherAttendanceRecord[];
+  staffRecords: StaffAttendanceRecord[];
+  teacherSummary: { total: number; present: number; late: number; absent: number; weeklyOff: number };
+  staffSummary: { total: number; present: number; late: number; absent: number; leave: number; weeklyOff: number };
+} => {
+  // Convert RawPunchRecords or TipsoiPunchRecords into TipsoiPunchRecord format
+  const formattedPunches: TipsoiPunchRecord[] = rawPunches.map(p => {
+    const timeStr = (p as any).punchTime || p.punch_time || p.logged_time || p.time || p.sync_time || '';
+    return {
+      id: p.id || (p as any).uid,
+      emp_id: p.emp_id || (p as any).studentId || (p as any).userId,
+      employee_id: p.employee_id || (p as any).studentId || (p as any).userId,
+      identifier: p.identifier || (p as any).studentId || (p as any).userId,
+      person_id: p.person_id || (p as any).userId,
+      person_identifier: p.person_identifier || (p as any).studentId,
+      card_no: p.card_no || (p as any).cardNo || p.rfid,
+      rfid: p.rfid || p.card_no,
+      name: p.name || (p as any).userName,
+      punch_time: timeStr,
+      logged_time: (p as any).punchTime || p.logged_time || timeStr,
+      sync_time: p.sync_time,
+      time: timeStr,
+      punch_type: p.punch_type || (p as any).punchType || 'biometric',
+      status: 'present',
+      device_name: p.device_name || (p as any).deviceName || 'টিপসই বায়োমেট্রিক ডিভাইস',
+      device_identifier: p.device_identifier || (p as any).deviceId,
+      raw: (p as any).raw || p
+    };
+  });
+
+  // Run teacher and staff matching with their customized policy settings
+  const matchResult = matchPunchesToStaffAndTeachers(
+    formattedPunches,
+    teachers,
+    staffList,
+    targetDate,
+    {
+      teacherRule: settings.teacherRule,
+      staffRule: settings.staffRule
+    },
+    leaveRequests
+  );
+
+  // Map to TeacherAttendanceRecords
+  const currentTeachersDb = getTeacherAttendanceDb();
+  const filteredTeacherDb = currentTeachersDb.filter(r => r.attendanceDate !== targetDate);
+
+  const newTeacherRecords: TeacherAttendanceRecord[] = matchResult.teacherResults.map(tr => ({
+    id: `tatt-${tr.id}-${targetDate}`,
+    teacherId: tr.id,
+    teacherName: tr.name,
+    department: tr.department || 'শিক্ষা বিভাগ',
+    attendanceDate: targetDate,
+    isWeeklyOff: tr.isWeeklyOff,
+    status: tr.status,
+    inTime: tr.firstInTime || (tr.status === 'weekly_off' ? '' : settings.teacherRule?.standardInTime || '08:00'),
+    outTime: tr.lastOutTime || (tr.status === 'weekly_off' ? '' : settings.teacherRule?.standardOutTime || '16:30'),
+    workingHours: tr.workingHours,
+    overtimeHours: tr.overtimeHours,
+    deductionAmount: tr.deductionAmount,
+    remarks: tr.isWeeklyOff ? 'সাপ্তাহিক ছুটি' : tr.status === 'late' ? `${enToBnNumber(tr.lateMinutes)} মিনিট বিলম্ব` : tr.status === 'present' ? 'টিপসই বায়োমেট্রিক উপস্থিত' : 'অনুপস্থিত',
+    markedBy: 'টিপসই API বায়োমেট্রিক সিস্টেম',
+    markedAt: new Date().toISOString()
+  }));
+
+  const updatedAllTeachers = [...filteredTeacherDb, ...newTeacherRecords];
+  saveTeacherAttendanceDb(updatedAllTeachers);
+
+  // Map to StaffAttendanceRecords
+  const currentStaffDb = getStaffAttendanceDb();
+  const filteredStaffDb = currentStaffDb.filter(r => r.attendanceDate !== targetDate);
+
+  const newStaffRecords: StaffAttendanceRecord[] = matchResult.staffResults.map(sr => ({
+    id: `satt-${sr.id}-${targetDate}`,
+    staffId: sr.id,
+    staffName: sr.name,
+    designation: sr.designation || 'কর্মচারী',
+    department: sr.department || 'সাধারণ প্রশাসন',
+    attendanceDate: targetDate,
+    status: (sr.status === 'weekly_off' ? 'present' : sr.status) as any,
+    inTime: sr.firstInTime || (sr.status === 'weekly_off' || sr.status === 'leave' ? '' : settings.staffRule?.standardInTime || '08:30'),
+    outTime: sr.lastOutTime || (sr.status === 'weekly_off' || sr.status === 'leave' ? '' : settings.staffRule?.standardOutTime || '17:00'),
+    totalHours: sr.workingHours,
+    overtimeHours: sr.overtimeHours,
+    deductionAmount: sr.deductionAmount,
+    remarks: sr.status === 'leave' ? 'ছুটিতে আছেন (অনুমোদিত)' : sr.isWeeklyOff ? 'সাপ্তাহিক ছুটি' : sr.status === 'late' ? `${enToBnNumber(sr.lateMinutes)} মিনিট বিলম্ব` : 'টিপসই উপস্থিতি',
+    markedAt: new Date().toISOString()
+  }));
+
+  const updatedAllStaff = [...filteredStaffDb, ...newStaffRecords];
+  saveStaffAttendanceDb(updatedAllStaff);
+
+  // Audit log
+  addAuditLog({
+    studentId: 'ALL_STAFF_TEACHERS',
+    studentName: 'শিক্ষক ও স্টাফবৃন্দ',
+    date: targetDate,
+    action: 'update',
+    modifiedBy: 'টিপসই এপিআই রিয়েল-টাইম সিঙ্ক',
+    newStatus: 'Synced',
+    reason: `শিক্ষক (${enToBnNumber(newTeacherRecords.length)} জন) এবং স্টাফ (${enToBnNumber(newStaffRecords.length)} জন) এর বায়োমেট্রিক হাজিরা টিপসই এপিআই থেকে সিঙ্ক করা হয়েছে।`
+  });
+
+  return {
+    teacherRecords: newTeacherRecords,
+    staffRecords: newStaffRecords,
+    teacherSummary: {
+      total: newTeacherRecords.length,
+      present: newTeacherRecords.filter(t => t.status === 'present').length,
+      late: newTeacherRecords.filter(t => t.status === 'late').length,
+      absent: newTeacherRecords.filter(t => t.status === 'absent').length,
+      weeklyOff: newTeacherRecords.filter(t => t.status === 'weekly_off').length
+    },
+    staffSummary: {
+      total: newStaffRecords.length,
+      present: newStaffRecords.filter(s => s.status === 'present').length,
+      late: newStaffRecords.filter(s => s.status === 'late').length,
+      absent: newStaffRecords.filter(s => s.status === 'absent').length,
+      leave: newStaffRecords.filter(s => s.status === 'leave').length,
+      weeklyOff: newStaffRecords.filter(s => (s as any).status === 'weekly_off').length
+    }
+  };
 };
 
