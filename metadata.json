@@ -1,0 +1,11 @@
+{
+  "name": "Al Madania Madrasa Management",
+  "description": "A comprehensive school management system for Al Madania Madrasa featuring student records, analytics dashboard, and admission management.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,112 @@
+@import "tailwindcss";
+@import url("https://fonts.maateen.me/kalpurush/font.css");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Hind+Siliguri:wght@300;400;500;600;700&display=swap");
+
+@theme {
+  --color-primary: var(--color-primary);
+  --color-secondary: var(--color-secondary);
+  --color-accent: var(--color-accent);
+  --color-success: var(--color-success);
+  --color-warning: var(--color-warning);
+  --color-danger: var(--color-danger);
+  --color-info: var(--color-info);
+  --color-error: var(--color-error);
+
+  --color-bg: var(--color-bg);
+  --color-card: var(--color-card);
+  --color-text-main: var(--color-text-main);
+  --color-text-light: var(--color-text-light);
+  --color-border-main: var(--color-border-main);
+  --color-step-bg: var(--color-step-bg);
+
+  --radius-card: 1.125rem; /* 18px */
+  --radius-input: 0.75rem;
+
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 12px 24px -8px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 20px 32px -8px rgba(0, 0, 0, 0.12);
+}
+
+:root {
+  --color-primary: #0d555c;     /* Deep Emerald Teal from ID Card */
+  --color-secondary: #c5a059;   /* Elegant Gold Accent from ID Card */
+  --color-accent: #14b8a6;      /* Vibrant Teal */
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-info: #3b82f6;
+  --color-error: #ef4444;
+
+  --color-bg: #f3f8f7;          /* Premium soft minty/teal background */
+  --color-card: #ffffff;
+  --color-text-main: #0f292d;   /* High-contrast dark slate-teal text */
+  --color-text-light: #51767a;  /* Muted teal-grey text */
+  --color-border-main: #e0ebe9; /* Soft teal border */
+  --color-step-bg: #eaf3f1;
+  --sidebar-bg: #0d555c;        /* Deep Emerald Teal sidebar */
+  --background: 184 75% 97%;
+  --foreground: 187 50% 12%;
+}
+
+.dark {
+  --color-primary: #14b8a6;     /* Brighter teal for high contrast dark mode */
+  --color-secondary: #c5a059;   /* Keep elegant gold accent */
+  --color-accent: #0d555c;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-info: #3b82f6;
+  --color-error: #ef4444;
+
+  --color-bg: #081213;          /* Ultra-premium dark slate-teal background */
+  --color-card: #0f1e20;         /* Deep slate-teal card */
+  --color-text-main: #f1f7f6;    /* Light teal/mint cream text */
+  --color-text-light: #89aba9;   /* Muted teal-grey text */
+  --color-border-main: #1d3336;  /* Deep slate-teal border */
+  --color-step-bg: #15272a;
+  --sidebar-bg: #060e0f;
+  --background: 185 53% 5%;
+  --foreground: 184 25% 96%;
+}
+
+body {
+  font-family: "Kalpurush", "Hind Siliguri", "Inter", sans-serif;
+  @apply bg-[var(--color-bg)] text-[var(--color-text-main)] transition-colors duration-300 antialiased font-medium;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  @apply font-bold;
+}
+
+button {
+  @apply font-semibold;
+}
+
+/* Bento Card Style */
+.bento-card {
+  @apply bg-[var(--color-card)] rounded-[1.125rem] border border-[var(--color-border-main)] shadow-sm transition-all duration-300;
+}
+
+.bento-card:hover {
+  @apply shadow-lg border-[var(--color-primary)]/20 -translate-y-1;
+}
+
+.glass {
+  @apply bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border border-white/20 dark:border-white/10;
+}
+
+.scrollbar-hide,
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

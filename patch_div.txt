@@ -1,0 +1,9 @@
+            <div 
+              className={cn("overflow-x-auto custom-scrollbar select-none", isDragging ? "cursor-grabbing" : "cursor-grab")}
+              ref={scrollRef}
+              onMouseDown={handleMouseDown}
+              onMouseLeave={handleMouseLeave}
+              onMouseUp={handleMouseUp}
+              onMouseMove={handleMouseMove}
+              onWheel={handleWheel}
+            >
