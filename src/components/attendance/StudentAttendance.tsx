@@ -578,11 +578,24 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
       {/* ------------------------------------------------------------- */}
       {activeTab === 'daily' && (
         <div className="space-y-6">
-          {/* SECTION 1: TODAY'S REAL-TIME SUMMARY STAT CARDS */}
+          {/* SECTION 1: TODAY'S REAL-TIME SUMMARY STAT CARDS (CLICKABLE FILTERS) */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 md:gap-4">
             {/* Total Students */}
-            <div className="bg-[var(--color-card)] rounded-2xl border border-[var(--color-border-main)] p-4 shadow-sm flex items-center gap-3">
-              <div className="w-11 h-11 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center font-bold">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedStatusFilter('সব স্ট্যাটাস');
+                setSelectedCategory('সব ক্যাটাগরি');
+                toast.success('সকল শিক্ষার্থীর তালিকা প্রদর্শিত হচ্ছে');
+              }}
+              className={cn(
+                "rounded-2xl border p-4 shadow-sm flex items-center gap-3 text-left transition-all cursor-pointer",
+                selectedStatusFilter === 'সব স্ট্যাটাস' && selectedCategory === 'সব ক্যাটাগরি'
+                  ? "bg-blue-500/10 border-blue-500 ring-2 ring-blue-500/30"
+                  : "bg-[var(--color-card)] border-[var(--color-border-main)] hover:border-blue-500/40"
+              )}
+            >
+              <div className="w-11 h-11 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center font-bold shrink-0">
                 <Users size={22} />
               </div>
               <div>
@@ -590,12 +603,25 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                 <div className="text-xl md:text-2xl font-bold text-[var(--color-text-main)]">
                   {enToBnNumber(stats.totalStudents)}
                 </div>
+                <div className="text-[9px] text-blue-600 font-bold mt-0.5">সব দেখুন ➔</div>
               </div>
-            </div>
+            </button>
 
             {/* Present Count */}
-            <div className="bg-[var(--color-card)] rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 shadow-sm flex items-center gap-3">
-              <div className="w-11 h-11 rounded-xl bg-emerald-500/20 text-emerald-600 flex items-center justify-center font-bold">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedStatusFilter('present');
+                toast.success('উপস্থিত শিক্ষার্থীদের তালিকা ফিল্টার করা হয়েছে');
+              }}
+              className={cn(
+                "rounded-2xl border p-4 shadow-sm flex items-center gap-3 text-left transition-all cursor-pointer",
+                selectedStatusFilter === 'present'
+                  ? "bg-emerald-500/15 border-emerald-500 ring-2 ring-emerald-500/40"
+                  : "bg-[var(--color-card)] border-emerald-500/20 bg-emerald-500/5 hover:border-emerald-500/40"
+              )}
+            >
+              <div className="w-11 h-11 rounded-xl bg-emerald-500/20 text-emerald-600 flex items-center justify-center font-bold shrink-0">
                 <CheckCircle2 size={22} />
               </div>
               <div>
@@ -603,12 +629,25 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                 <div className="text-xl md:text-2xl font-bold text-emerald-700 dark:text-emerald-300">
                   {enToBnNumber(stats.presentCount)}
                 </div>
+                <div className="text-[9px] text-emerald-600 font-bold mt-0.5">উপস্থিত তালিকা ➔</div>
               </div>
-            </div>
+            </button>
 
             {/* Absent Count */}
-            <div className="bg-[var(--color-card)] rounded-2xl border border-rose-500/20 bg-rose-500/5 p-4 shadow-sm flex items-center gap-3">
-              <div className="w-11 h-11 rounded-xl bg-rose-500/20 text-rose-600 flex items-center justify-center font-bold">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedStatusFilter('absent');
+                toast.success('অনুপস্থিত শিক্ষার্থীদের তালিকা ফিল্টার করা হয়েছে');
+              }}
+              className={cn(
+                "rounded-2xl border p-4 shadow-sm flex items-center gap-3 text-left transition-all cursor-pointer",
+                selectedStatusFilter === 'absent'
+                  ? "bg-rose-500/15 border-rose-500 ring-2 ring-rose-500/40"
+                  : "bg-[var(--color-card)] border-rose-500/20 bg-rose-500/5 hover:border-rose-500/40"
+              )}
+            >
+              <div className="w-11 h-11 rounded-xl bg-rose-500/20 text-rose-600 flex items-center justify-center font-bold shrink-0">
                 <XCircle size={22} />
               </div>
               <div>
@@ -616,12 +655,25 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                 <div className="text-xl md:text-2xl font-bold text-rose-700 dark:text-rose-300">
                   {enToBnNumber(stats.absentCount)}
                 </div>
+                <div className="text-[9px] text-rose-600 font-bold mt-0.5">অনুপস্থিত তালিকা ➔</div>
               </div>
-            </div>
+            </button>
 
             {/* Late Count */}
-            <div className="bg-[var(--color-card)] rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 shadow-sm flex items-center gap-3">
-              <div className="w-11 h-11 rounded-xl bg-amber-500/20 text-amber-600 flex items-center justify-center font-bold">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedStatusFilter('late');
+                toast.success('দেরিতে উপস্থিত (Late) শিক্ষার্থীদের তালিকা ফিল্টার করা হয়েছে');
+              }}
+              className={cn(
+                "rounded-2xl border p-4 shadow-sm flex items-center gap-3 text-left transition-all cursor-pointer",
+                selectedStatusFilter === 'late'
+                  ? "bg-amber-500/15 border-amber-500 ring-2 ring-amber-500/40"
+                  : "bg-[var(--color-card)] border-amber-500/20 bg-amber-500/5 hover:border-amber-500/40"
+              )}
+            >
+              <div className="w-11 h-11 rounded-xl bg-amber-500/20 text-amber-600 flex items-center justify-center font-bold shrink-0">
                 <Clock size={22} />
               </div>
               <div>
@@ -629,12 +681,25 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                 <div className="text-xl md:text-2xl font-bold text-amber-700 dark:text-amber-300">
                   {enToBnNumber(stats.lateCount)}
                 </div>
+                <div className="text-[9px] text-amber-600 font-bold mt-0.5">দেরিতে তালিকা ➔</div>
               </div>
-            </div>
+            </button>
 
             {/* Missing Exit / Residential Split */}
-            <div className="bg-[var(--color-card)] rounded-2xl border border-purple-500/20 bg-purple-500/5 p-4 shadow-sm flex items-center gap-3 col-span-2 sm:col-span-1">
-              <div className="w-11 h-11 rounded-xl bg-purple-500/20 text-purple-600 flex items-center justify-center font-bold">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedCategory(selectedCategory === 'আবাসিক' ? 'সব ক্যাটাগরি' : 'আবাসিক');
+                toast.success('আবাসিক শিক্ষার্থীদের তালিকা ফিল্টার করা হয়েছে');
+              }}
+              className={cn(
+                "rounded-2xl border p-4 shadow-sm flex items-center gap-3 col-span-2 sm:col-span-1 text-left transition-all cursor-pointer",
+                selectedCategory === 'আবাসিক'
+                  ? "bg-purple-500/15 border-purple-500 ring-2 ring-purple-500/40"
+                  : "bg-[var(--color-card)] border-purple-500/20 bg-purple-500/5 hover:border-purple-500/40"
+              )}
+            >
+              <div className="w-11 h-11 rounded-xl bg-purple-500/20 text-purple-600 flex items-center justify-center font-bold shrink-0">
                 <Home size={22} />
               </div>
               <div>
@@ -642,8 +707,9 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                 <div className="text-sm font-bold text-purple-900 dark:text-purple-300">
                   আবা: {enToBnNumber(stats.residentialPresent)} | অনাবা: {enToBnNumber(stats.nonResidentialPresent)}
                 </div>
+                <div className="text-[9px] text-purple-600 font-bold mt-0.5">আবাসিক ফিল্টার ➔</div>
               </div>
-            </div>
+            </button>
           </div>
 
           {/* SECTION 2: INDEPENDENT MULTI-FILTER BAR */}

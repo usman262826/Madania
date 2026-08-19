@@ -43,13 +43,14 @@ import { calculateWorkingHours, calculateTeacherSalary } from '../../utils/atten
 import { subscribeToAttendanceUpdates } from '../../services/attendanceEngine';
 import { TipsoiSyncModal } from './TipsoiSyncModal';
 import { TeacherStaffAttendanceReportModal } from './TeacherStaffAttendanceReportModal';
+import { TeacherAttendanceDashboard } from './TeacherAttendanceDashboard';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 
 export const TeacherAttendance: React.FC = () => {
   const { staffMembers, teachers, madrasahBranding } = useData();
-  const [activeTab, setActiveTab] = useState<'daily' | 'rules' | 'salary_gen' | 'biometric'>('daily');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'daily' | 'rules' | 'salary_gen' | 'biometric'>('dashboard');
   const [showTipsoiModal, setShowTipsoiModal] = useState(false);
   const [viewingTeacher, setViewingTeacher] = useState<any>(null);
 
@@ -398,6 +399,19 @@ export const TeacherAttendance: React.FC = () => {
         {/* Tab Switcher */}
         <div className="flex flex-wrap items-center gap-2 relative z-10">
           <button
+            onClick={() => setActiveTab('dashboard')}
+            className={cn(
+              "px-4 py-2.5 rounded-xl font-black text-xs flex items-center gap-2 transition-all cursor-pointer",
+              activeTab === 'dashboard'
+                ? "bg-primary text-white shadow-lg shadow-primary/25"
+                : "bg-step-bg text-text-light hover:text-text-main border border-border-main"
+            )}
+          >
+            <Radio size={16} className={activeTab === 'dashboard' ? "animate-pulse" : ""} />
+            <span>লাইভ ড্যাশবোর্ড ও শিফট</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('daily')}
             className={cn(
               "px-4 py-2.5 rounded-xl font-black text-xs flex items-center gap-2 transition-all cursor-pointer",
@@ -450,6 +464,17 @@ export const TeacherAttendance: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* ========================================================================= */}
+      {/* 0. LIVE DASHBOARD & SHIFT METRICS TAB */}
+      {/* ========================================================================= */}
+      {activeTab === 'dashboard' && (
+        <TeacherAttendanceDashboard 
+          teachers={teachers}
+          staffMembers={staffMembers}
+          madrasahBranding={madrasahBranding}
+        />
+      )}
 
       {/* ========================================================================= */}
       {/* 1. DAILY TEACHER ATTENDANCE TAB */}

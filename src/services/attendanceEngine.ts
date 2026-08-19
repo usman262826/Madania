@@ -59,6 +59,27 @@ export const notifyAttendanceUpdate = () => {
 };
 
 // -------------------------------------------------------------
+// DATA CLEANUP / GARBAGE REMOVAL HELPER
+// -------------------------------------------------------------
+export const clearAllAttendanceAndMessagingData = () => {
+  try {
+    localStorage.removeItem(STORAGE_KEYS.RAW_PUNCHES);
+    localStorage.removeItem(STORAGE_KEYS.PROCESSED_EVENTS);
+    localStorage.removeItem(STORAGE_KEYS.DAILY_ATTENDANCE);
+    localStorage.removeItem(STORAGE_KEYS.SENT_MESSAGES);
+    localStorage.removeItem(STORAGE_KEYS.AUDIT_LOGS);
+    localStorage.removeItem(STORAGE_KEYS.TEACHER_ATTENDANCE);
+    localStorage.removeItem(STORAGE_KEYS.STAFF_ATTENDANCE);
+    localStorage.removeItem(STORAGE_KEYS.STAFF_LEAVE_REQUESTS);
+    notifyAttendanceUpdate();
+    return true;
+  } catch (e) {
+    console.error('Error clearing data:', e);
+    return false;
+  }
+};
+
+// -------------------------------------------------------------
 // SETTINGS HELPERS
 // -------------------------------------------------------------
 export const getAttendanceSettings = (): AttendanceSettings => {
