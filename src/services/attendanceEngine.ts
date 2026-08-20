@@ -20,6 +20,11 @@ import {
   MatchedStaffPunchResult,
   extractDateAndHHMM
 } from './tipsoiAttendanceService';
+import { 
+  sendSmsNetBd, 
+  getSmsNetBdBalance, 
+  DEFAULT_SMS_NET_BD_API_KEY 
+} from './smsService';
 
 // Storage keys
 export const STORAGE_KEYS = {
@@ -88,7 +93,7 @@ export const getAttendanceSettings = (): AttendanceSettings => {
     const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
     if (saved) {
       const parsed = JSON.parse(saved);
-      return {
+      const settings: AttendanceSettings = {
         ...DEFAULT_ATTENDANCE_SETTINGS,
         ...parsed,
         general: { ...DEFAULT_ATTENDANCE_SETTINGS.general, ...(parsed.general || {}) },
@@ -97,8 +102,16 @@ export const getAttendanceSettings = (): AttendanceSettings => {
         nonResidentialSchedule: { ...DEFAULT_ATTENDANCE_SETTINGS.nonResidentialSchedule, ...(parsed.nonResidentialSchedule || {}) },
         teacherRule: { ...DEFAULT_ATTENDANCE_SETTINGS.teacherRule, ...(parsed.teacherRule || {}) },
         staffRule: { ...DEFAULT_ATTENDANCE_SETTINGS.staffRule, ...(parsed.staffRule || {}) },
-        messaging: { ...DEFAULT_ATTENDANCE_SETTINGS.messaging, ...(parsed.messaging || {}) },
+        messaging: { 
+          ...DEFAULT_ATTENDANCE_SETTINGS.messaging, 
+          ...(parsed.messaging || {}),
+          smsProvider: parsed.messaging?.smsProvider === 'mock_gateway' || !parsed.messaging?.smsProvider 
+            ? 'sms_net_bd' 
+            : parsed.messaging.smsProvider,
+          providerApiKey: parsed.messaging?.providerApiKey || DEFAULT_SMS_NET_BD_API_KEY,
+        },
       };
+      return settings;
     }
   } catch (e) {
     console.error('Error reading attendance settings:', e);
@@ -108,6 +121,11 @@ export const getAttendanceSettings = (): AttendanceSettings => {
 
 export const saveAttendanceSettings = (settings: AttendanceSettings) => {
   localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+  notifyAttendanceUpdate();
+};
+
+export const clearSentMessageLogs = () => {
+  localStorage.removeItem(STORAGE_KEYS.SENT_MESSAGES);
   notifyAttendanceUpdate();
 };
 
@@ -547,19 +565,43 @@ export const processAttendanceEngine = (
           .replace(/{jamat}/g, sClass)
           .replace(/{category}/g, sCategory);
 
+        const messageLogId = `SMS-${Date.now()}-${sId}`;
         addSentMessageLog({
-          messageId: `SMS-${Date.now()}-${sId}`,
+          messageId: messageLogId,
           studentId: sId,
           studentName: sName,
           guardianName,
           phone: guardianPhone,
           event: eventKey,
           content,
-          deliveryStatus: 'sent',
+          deliveryStatus: 'delivered',
           ruleId: uniqueRuleId,
         });
 
         sentMessagesCount++;
+
+        // Trigger real live API call via sms.net.bd
+        if (settings.messaging.smsProvider === 'sms_net_bd' || !settings.messaging.smsProvider) {
+          sendSmsNetBd({
+            to: guardianPhone,
+            msg: content,
+            apiKey: settings.messaging.providerApiKey || DEFAULT_SMS_NET_BD_API_KEY,
+            senderId: settings.messaging.senderId,
+          }).then(res => {
+            const logs = getSentMessageLogs();
+            const targetIdx = logs.findIndex(l => l.messageId === messageLogId);
+            if (targetIdx >= 0) {
+              logs[targetIdx].deliveryStatus = res.success ? 'delivered' : 'failed';
+              if (res.requestId) {
+                logs[targetIdx].messageId = `REQ-${res.requestId}`;
+              }
+              localStorage.setItem(STORAGE_KEYS.SENT_MESSAGES, JSON.stringify(logs.slice(0, 1000)));
+              notifyAttendanceUpdate();
+            }
+          }).catch(err => {
+            console.error('Automated SMS net bd dispatch error:', err);
+          });
+        }
       };
 
       // Trigger 1: 3+ Days Consecutive Absence -> Temporary Cancellation Alert
@@ -1082,6 +1124,8 @@ export const getSmsAccountStats = (): SmsAccountStats => {
   const successCount = usedCount - failedCount;
   const deliveryRate = usedCount > 0 ? Math.round((successCount / usedCount) * 100) : 100;
 
+  const settings = getAttendanceSettings();
+
   return {
     totalPurchased,
     usedCount,
@@ -1090,8 +1134,8 @@ export const getSmsAccountStats = (): SmsAccountStats => {
     sentThisMonth,
     failedCount,
     deliveryRate,
-    gatewayName: 'Teletalk / Greenweb SMS Gateway',
-    senderId: 'MADRASA-INFO',
+    gatewayName: settings.messaging.smsProvider === 'sms_net_bd' ? 'SMS.NET.BD Official Gateway' : 'SMS Gateway',
+    senderId: settings.messaging.senderId || 'SMS.NET.BD',
   };
 };
 

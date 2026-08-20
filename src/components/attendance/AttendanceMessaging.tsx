@@ -31,8 +31,16 @@ import {
   getAttendanceSettings, 
   saveAttendanceSettings, 
   getSentMessageLogs, 
-  addSentMessageLog 
+  addSentMessageLog,
+  clearSentMessageLogs 
 } from '../../services/attendanceEngine';
+import { 
+  sendSmsNetBd, 
+  getSmsNetBdBalance, 
+  getSmsNetBdReport, 
+  DEFAULT_SMS_NET_BD_API_KEY,
+  SmsBalanceResult 
+} from '../../services/smsService';
 import { enToBnNumber, cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -51,6 +59,13 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
   const [testStudentId, setTestStudentId] = useState<string>(() => students[0]?.id || '101');
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [searchStudentTerm, setSearchStudentTerm] = useState('');
+  
+  // Real SMS.NET.BD states
+  const [smsBalance, setSmsBalance] = useState<{ balance?: string | number; user?: string; error?: number; msg?: string } | null>(null);
+  const [isLoadingBalance, setIsLoadingBalance] = useState(false);
+  const [customTestPhone, setCustomTestPhone] = useState('');
+  const [customTestMsg, setCustomTestMsg] = useState('আল মাদানিয়া মাদ্রাসা: আপনার সন্তানের হাজিরা সংক্রান্ত টেস্ট SMS।');
+  const [isSendingCustomTest, setIsSendingCustomTest] = useState(false);
 
   const filteredStudentsForOverrides = useMemo(() => {
     return students.filter(student => {
@@ -66,12 +81,37 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
 
   useEffect(() => {
     setLogs(getSentMessageLogs());
+    fetchBalance();
   }, []);
+
+  const fetchBalance = async (apiKeyOverride?: string) => {
+    setIsLoadingBalance(true);
+    try {
+      const key = apiKeyOverride || settings.messaging.providerApiKey || DEFAULT_SMS_NET_BD_API_KEY;
+      const res = await getSmsNetBdBalance(key);
+      setSmsBalance(res);
+      if (res.error === 0) {
+        toast.success(`SMS ব্যালেন্স আপডেট হয়েছে: ${res.balance} BDT`);
+      }
+    } catch (err: any) {
+      console.error('Balance fetch failed:', err);
+    } finally {
+      setIsLoadingBalance(false);
+    }
+  };
 
   const handleSaveSettings = (newSettings: AttendanceSettings) => {
     setSettings(newSettings);
     saveAttendanceSettings(newSettings);
     toast.success('মেসেজিং সেটিংস সফলভাবে সংরক্ষিত হয়েছে!');
+  };
+
+  const handleClearLogs = () => {
+    if (window.confirm('আপনি কি নিশ্চিত যে সকল SMS মেসেজ লগ মুছে ফেলতে চান?')) {
+      clearSentMessageLogs();
+      setLogs([]);
+      toast.success('সকল SMS লগ মুছে ফেলা হয়েছে!');
+    }
   };
 
   const sampleStudent = students.find(s => String(s.id || s['রেজিস্ট্রেশন/আইডি নম্বর']) === testStudentId) || students[0] || {
@@ -105,30 +145,91 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
       .replace(/{category}/g, sCat);
   };
 
-  const handleSendTestSMS = () => {
+  const handleSendTestSMS = async () => {
     setIsSendingTest(true);
-    setTimeout(() => {
-      const template = settings.messaging.templates[selectedTemplateKey];
-      const previewContent = getTemplatePreview(template);
-      const phone = sampleStudent['মোবাইল (বাবা/ভাই)'] || sampleStudent.mobile || '01711000000';
-      const sId = String(sampleStudent.id || '101');
+    const template = settings.messaging.templates[selectedTemplateKey];
+    const previewContent = getTemplatePreview(template);
+    const phone = sampleStudent['মোবাইল (বাবা/ভাই)'] || sampleStudent.mobile || '01711000000';
+    const sId = String(sampleStudent.id || '101');
+
+    try {
+      const apiKey = settings.messaging.providerApiKey || DEFAULT_SMS_NET_BD_API_KEY;
+      const res = await sendSmsNetBd({
+        to: phone,
+        msg: previewContent,
+        apiKey,
+        senderId: settings.messaging.senderId,
+      });
 
       addSentMessageLog({
-        messageId: `TEST-${Date.now()}`,
+        messageId: res.requestId ? `REQ-${res.requestId}` : `TEST-${Date.now()}`,
         studentId: sId,
         studentName: sampleStudent['শিক্ষার্থীর নাম'] || sampleStudent.name || 'শিক্ষার্থী',
         guardianName: sampleStudent['পিতার নাম'] || 'অভিভাবক',
         phone,
         event: selectedTemplateKey as any,
         content: previewContent,
-        deliveryStatus: 'delivered',
+        deliveryStatus: res.success ? 'delivered' : 'failed',
         ruleId: `test_${Date.now()}`,
       });
 
       setLogs(getSentMessageLogs());
+      if (res.success) {
+        toast.success(`টেস্ট SMS সফলভাবে পাঠানো হয়েছে: ${phone}`);
+      } else {
+        toast.error(`SMS প্রেরণে সমস্যা: ${res.msg || 'অজানা ত্রুটি'}`);
+      }
+    } catch (err: any) {
+      toast.error(`ত্রুটি: ${err?.message || 'SMS পাঠাতে ব্যর্থ'}`);
+    } finally {
       setIsSendingTest(false);
-      toast.success(`টেস্ট SMS সফলভাবে পাঠানো হয়েছে: ${phone}`);
-    }, 600);
+    }
+  };
+
+  const handleSendCustomDirectSMS = async () => {
+    if (!customTestPhone.trim()) {
+      toast.error('অনুগ্রহ করে মোবাইল নম্বর লিখুন');
+      return;
+    }
+    if (!customTestMsg.trim()) {
+      toast.error('অনুগ্রহ করে মেসেজের টেক্সট লিখুন');
+      return;
+    }
+
+    setIsSendingCustomTest(true);
+    try {
+      const apiKey = settings.messaging.providerApiKey || DEFAULT_SMS_NET_BD_API_KEY;
+      const res = await sendSmsNetBd({
+        to: customTestPhone.trim(),
+        msg: customTestMsg.trim(),
+        apiKey,
+        senderId: settings.messaging.senderId,
+      });
+
+      addSentMessageLog({
+        messageId: res.requestId ? `REQ-${res.requestId}` : `CUSTOM-${Date.now()}`,
+        studentId: 'MANUAL',
+        studentName: 'সরাসরি টেস্ট',
+        guardianName: 'ম্যানুয়াল প্রাপক',
+        phone: customTestPhone.trim(),
+        event: 'manual_notice' as any,
+        content: customTestMsg.trim(),
+        deliveryStatus: res.success ? 'delivered' : 'failed',
+        ruleId: `manual_${Date.now()}`,
+      });
+
+      setLogs(getSentMessageLogs());
+      if (res.success) {
+        toast.success(`সরাসরি SMS সফলভাবে ডেলিভারি করা হয়েছে: ${customTestPhone}`);
+        setCustomTestPhone('');
+      } else {
+        toast.error(`SMS সেন্ডিং ব্যর্থ: ${res.msg || 'ত্রুটি'}`);
+      }
+    } catch (err: any) {
+      toast.error(`SMS ব্যর্থ: ${err?.message || 'নেটওয়ার্ক সমস্যা'}`);
+    } finally {
+      setIsSendingCustomTest(false);
+    }
   };
 
   const filteredLogs = logs.filter(l => {
@@ -587,7 +688,7 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
               স্বয়ংক্রিয় প্রেরিত SMS লগ খতিয়ান ({enToBnNumber(filteredLogs.length)}টি)
             </h3>
 
-            <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
               <div className="relative flex-1 sm:w-60">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
@@ -611,7 +712,18 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
                 <option value="cancellation3Days">৩ দিন বাতিল</option>
                 <option value="entry">প্রবেশ</option>
                 <option value="exit">প্রস্থান</option>
+                <option value="manual_notice">সরাসরি টেস্ট</option>
               </select>
+
+              {logs.length > 0 && (
+                <button
+                  onClick={handleClearLogs}
+                  className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 border border-rose-500/30 text-xs font-bold transition-all"
+                  title="সকল ডামি ও পূর্বের লগ মুছে ফেলুন"
+                >
+                  লগ মুছুন
+                </button>
+              )}
             </div>
           </div>
 
@@ -638,7 +750,7 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
                   filteredLogs.map(log => (
                     <tr key={log.id} className="hover:bg-[var(--color-bg)]/50 transition-colors">
                       <td className="p-3 font-mono text-[11px] text-[var(--color-text-light)] whitespace-nowrap">
-                        {log.sentTime.replace('T', ' ').slice(0, 19)}
+                        {log.sentTime ? log.sentTime.replace('T', ' ').slice(0, 19) : ''}
                       </td>
                       <td className="p-3">
                         <div className="font-bold text-[var(--color-text-main)]">{log.studentName}</div>
@@ -654,19 +766,32 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
                           log.event === 'absent' && "bg-rose-500/10 text-rose-600",
                           log.event === 'warning2Days' && "bg-orange-500/10 text-orange-600",
                           log.event === 'cancellation3Days' && "bg-red-600 text-white",
-                          (log.event === 'entry' || log.event === 'exit') && "bg-teal-500/10 text-teal-600"
+                          (log.event === 'entry' || log.event === 'exit') && "bg-teal-500/10 text-teal-600",
+                          log.event === 'manual_notice' && "bg-indigo-500/10 text-indigo-600"
                         )}>
-                          {log.event === 'late' ? 'দেরিতে উপস্থিত' : log.event === 'absent' ? 'অনুপস্থিত' : log.event === 'warning2Days' ? '২ দিন সতর্কতা' : log.event === 'cancellation3Days' ? 'সাময়িক বাতিল' : log.event}
+                          {log.event === 'late' ? 'দেরিতে উপস্থিত' : log.event === 'absent' ? 'অনুপস্থিত' : log.event === 'warning2Days' ? '২ দিন সতর্কতা' : log.event === 'cancellation3Days' ? 'সাময়িক বাতিল' : log.event === 'manual_notice' ? 'সরাসরি টেস্ট' : log.event}
                         </span>
                       </td>
                       <td className="p-3 max-w-md text-xs text-[var(--color-text-main)] leading-relaxed">
                         {log.content}
                       </td>
                       <td className="p-3 whitespace-nowrap">
-                        <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 text-[10px] font-bold flex items-center gap-1 w-fit">
-                          <CheckCircle2 size={11} />
-                          সফলভাবে প্রেরিত
-                        </span>
+                        {log.deliveryStatus === 'delivered' ? (
+                          <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 text-[10px] font-bold flex items-center gap-1 w-fit">
+                            <CheckCircle2 size={11} />
+                            ডেলিভার্ড
+                          </span>
+                        ) : log.deliveryStatus === 'failed' ? (
+                          <span className="px-2 py-0.5 rounded bg-rose-500/10 text-rose-600 text-[10px] font-bold flex items-center gap-1 w-fit">
+                            <AlertCircle size={11} />
+                            ব্যর্থ
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded bg-sky-500/10 text-sky-600 text-[10px] font-bold flex items-center gap-1 w-fit">
+                            <Clock size={11} />
+                            প্রেরিত
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -772,88 +897,201 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
 
       {/* Tab 5: SMS Gateway / Provider Config */}
       {activeSubTab === 'gateway' && (
-        <div className="bg-[var(--color-card)] rounded-2xl border border-[var(--color-border-main)] p-6 shadow-sm space-y-4 max-w-2xl">
-          <h3 className="font-bold text-base text-[var(--color-text-main)] flex items-center gap-2">
-            <Settings className="text-teal-600" size={18} />
-            SMS গেটওয়ে কনফিগারেশন
-          </h3>
-          
-          <div className="space-y-3 pt-2">
-            <div>
-              <label className="text-xs font-bold text-[var(--color-text-main)] block mb-1">
-                SMS প্রোভাইডার নির্বাচন:
-              </label>
-              <select
-                value={settings.messaging.smsProvider}
-                onChange={(e) => {
-                  const updated = {
-                    ...settings,
-                    messaging: {
-                      ...settings.messaging,
-                      smsProvider: e.target.value as any,
-                    }
-                  };
-                  setSettings(updated);
-                }}
-                className="w-full p-2.5 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-medium"
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Main Config */}
+          <div className="lg:col-span-7 bg-[var(--color-card)] rounded-2xl border border-[var(--color-border-main)] p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-base text-[var(--color-text-main)] flex items-center gap-2">
+                <Settings className="text-teal-600" size={18} />
+                SMS.NET.BD গেটওয়ে কনফিগারেশন
+              </h3>
+              <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/30 text-[10px] font-bold">
+                API Live
+              </span>
+            </div>
+            
+            <div className="space-y-4 pt-2">
+              <div>
+                <label className="text-xs font-bold text-[var(--color-text-main)] block mb-1">
+                  SMS প্রোভাইডার:
+                </label>
+                <select
+                  value={settings.messaging.smsProvider}
+                  onChange={(e) => {
+                    const updated = {
+                      ...settings,
+                      messaging: {
+                        ...settings.messaging,
+                        smsProvider: e.target.value as any,
+                      }
+                    };
+                    setSettings(updated);
+                  }}
+                  className="w-full p-2.5 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-medium"
+                >
+                  <option value="sms_net_bd">SMS.NET.BD Official Gateway (সংযুক্ত ও সক্রিয়)</option>
+                  <option value="greenweb">Greenweb SMS Gateway Bangladesh</option>
+                  <option value="bulk_sms_bd">Bulk SMS BD Gateway</option>
+                  <option value="custom_api">কাস্টম HTTP API গেটওয়ে</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-[var(--color-text-main)] block mb-1">
+                  API Key / Token:
+                </label>
+                <input
+                  type="text"
+                  value={settings.messaging.providerApiKey || ''}
+                  onChange={(e) => {
+                    const updated = {
+                      ...settings,
+                      messaging: {
+                        ...settings.messaging,
+                        providerApiKey: e.target.value,
+                      }
+                    };
+                    setSettings(updated);
+                  }}
+                  className="w-full p-2.5 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-mono font-medium"
+                  placeholder="a23Hnfiv06596m0p8r06RU8Tcs6eI49JQDL9T3Ug"
+                />
+                <p className="text-[11px] text-[var(--color-text-light)] mt-1">
+                  আপনার SMS.NET.BD অ্যাকাউন্ট এপিআই কী।
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-[var(--color-text-main)] block mb-1">
+                  অনুমোদিত Sender ID / মাস্কিং (ঐচ্ছিক):
+                </label>
+                <input
+                  type="text"
+                  value={settings.messaging.senderId || ''}
+                  onChange={(e) => {
+                    const updated = {
+                      ...settings,
+                      messaging: {
+                        ...settings.messaging,
+                        senderId: e.target.value,
+                      }
+                    };
+                    setSettings(updated);
+                  }}
+                  className="w-full p-2.5 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-medium"
+                  placeholder="অনুমোদিত প্রেরক নাম থাকলে লিখুন (খালি রাখলে ডিফল্ট নম্বর)"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => handleSaveSettings(settings)}
+                  className="flex-1 py-2.5 px-6 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2"
+                >
+                  <Check size={14} />
+                  <span>গেটওয়ে সেটিংস সংরক্ষণ করুন</span>
+                </button>
+
+                <button
+                  onClick={() => fetchBalance(settings.messaging.providerApiKey)}
+                  disabled={isLoadingBalance}
+                  className="py-2.5 px-4 rounded-xl bg-[var(--color-bg)] hover:bg-[var(--color-border-main)] text-[var(--color-text-main)] border border-[var(--color-border-main)] text-xs font-bold transition-all flex items-center gap-2"
+                >
+                  <RefreshCw size={14} className={isLoadingBalance ? "animate-spin" : ""} />
+                  <span>ব্যালেন্স চেক</span>
+                </button>
+              </div>
+
+              {/* Data Cleanup */}
+              <div className="p-4 rounded-xl bg-rose-500/5 border border-rose-500/20 mt-4 space-y-2">
+                <div className="text-xs font-bold text-rose-700 dark:text-rose-400 flex items-center gap-2">
+                  <AlertTriangle size={14} />
+                  ডামি ও টেস্ট ডাটা পরিচ্ছন্নকরণ
+                </div>
+                <p className="text-[11px] text-[var(--color-text-light)]">
+                  পূর্বে ব্যবহৃত যে কোনো ডামি মেসেজ লগ অথবা টেস্ট মেসেজ ডাটা মুছে ফেলতে নিচের বাটন চাপুন।
+                </p>
+                <button
+                  onClick={handleClearLogs}
+                  className="py-1.5 px-3 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all"
+                >
+                  সকল SMS মেসেজ লগ মুছুন
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Balance & Direct SMS Sender */}
+          <div className="lg:col-span-5 space-y-6">
+            {/* Live Balance Card */}
+            <div className="bg-gradient-to-br from-teal-700 to-emerald-800 text-white rounded-2xl p-6 shadow-md space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-teal-100 uppercase tracking-wider">SMS.NET.BD লাইভ একাউন্ট</span>
+                <span className="px-2 py-0.5 rounded-full bg-white/20 text-[10px] font-bold">সক্রিয় গেটওয়ে</span>
+              </div>
+
+              <div className="py-2">
+                <div className="text-2xl md:text-3xl font-black font-mono">
+                  {isLoadingBalance ? (
+                    <span className="text-sm">ব্যালেন্স লোড হচ্ছে...</span>
+                  ) : smsBalance && smsBalance.error === 0 ? (
+                    `${smsBalance.balance} BDT`
+                  ) : (
+                    "ব্যালেন্স সংযুক্ত"
+                  )}
+                </div>
+                <div className="text-xs text-teal-100 mt-1">
+                  ইউজার/স্ট্যাটাস: {smsBalance?.user || 'SMS.NET.BD Client'}
+                </div>
+              </div>
+
+              <button
+                onClick={() => fetchBalance()}
+                disabled={isLoadingBalance}
+                className="w-full py-2 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer"
               >
-                <option value="mock_gateway">সিমুলেটেড / ইন-মেমোরি গেটওয়ে (Instant Free Testing)</option>
-                <option value="greenweb">Greenweb SMS Gateway Bangladesh</option>
-                <option value="bulk_sms_bd">Bulk SMS BD Gateway</option>
-                <option value="custom_api">কাস্টম HTTP API গেটওয়ে</option>
-              </select>
+                <RefreshCw size={14} className={isLoadingBalance ? "animate-spin" : ""} />
+                <span>তাত্ক্ষণিক ব্যালেন্স রিফ্রেশ</span>
+              </button>
             </div>
 
-            <div>
-              <label className="text-xs font-bold text-[var(--color-text-main)] block mb-1">
-                মাস্কিং / Sender ID:
-              </label>
-              <input
-                type="text"
-                value={settings.messaging.senderId || 'ALMADANIA'}
-                onChange={(e) => {
-                  const updated = {
-                    ...settings,
-                    messaging: {
-                      ...settings.messaging,
-                      senderId: e.target.value,
-                    }
-                  };
-                  setSettings(updated);
-                }}
-                className="w-full p-2.5 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-medium"
-                placeholder="ALMADANIA"
-              />
-            </div>
+            {/* Direct Instant SMS Tester */}
+            <div className="bg-[var(--color-card)] rounded-2xl border border-[var(--color-border-main)] p-6 shadow-sm space-y-3">
+              <h4 className="font-bold text-sm text-[var(--color-text-main)] flex items-center gap-2">
+                <Send className="text-teal-600" size={16} />
+                যেকোনো নম্বরে সরাসরি টেস্ট SMS পাঠান
+              </h4>
+              <p className="text-[11px] text-[var(--color-text-light)]">
+                সরাসরি SMS ডেলিভারি পরীক্ষা করার জন্য যেকোনো বাংলাদেশি নম্বর লিখুন:
+              </p>
 
-            <div>
-              <label className="text-xs font-bold text-[var(--color-text-main)] block mb-1">
-                API Token / Secret Key:
-              </label>
-              <input
-                type="password"
-                value={settings.messaging.providerApiKey || ''}
-                onChange={(e) => {
-                  const updated = {
-                    ...settings,
-                    messaging: {
-                      ...settings.messaging,
-                      providerApiKey: e.target.value,
-                    }
-                  };
-                  setSettings(updated);
-                }}
-                className="w-full p-2.5 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-medium"
-                placeholder="SMS Gateway API Key"
-              />
-            </div>
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  placeholder="মোবাইল নম্বর (যেমন: 01712345678)"
+                  value={customTestPhone}
+                  onChange={(e) => setCustomTestPhone(e.target.value)}
+                  className="w-full p-2.5 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-mono font-medium"
+                />
 
-            <button
-              onClick={() => handleSaveSettings(settings)}
-              className="py-2.5 px-6 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition-all shadow-sm"
-            >
-              গেটওয়ে সেটিংস সংরক্ষণ করুন
-            </button>
+                <textarea
+                  rows={3}
+                  placeholder="মেসেজের বিবরণ লিখুন..."
+                  value={customTestMsg}
+                  onChange={(e) => setCustomTestMsg(e.target.value)}
+                  className="w-full p-2.5 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-medium"
+                />
+
+                <button
+                  onClick={handleSendCustomDirectSMS}
+                  disabled={isSendingCustomTest}
+                  className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-sm"
+                >
+                  <Send size={14} />
+                  <span>{isSendingCustomTest ? "SMS পাঠানো হচ্ছে..." : "এখনই SMS পাঠান"}</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

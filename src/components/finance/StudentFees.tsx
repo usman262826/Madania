@@ -34,6 +34,7 @@ import {
   Users
 } from 'lucide-react';
 import { FeesCostPackageManager } from './FeesCostPackageManager';
+import { InvoiceViewer } from './InvoiceViewer';
 import { Student } from '../../types';
 import { useData } from '../../contexts/DataContext';
 import { enToBnNumber, cn, getActiveBranches, isClassMatch, numberToBanglaWords } from '../../lib/utils';
@@ -89,6 +90,7 @@ interface Invoice {
   month: string;
   year: string;
   comment: string;
+  paymentMethod?: string;
 }
 
 interface StudentFeesProps {
@@ -479,10 +481,12 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
   // Custom structure for items row
   const [colItems, setColItems] = useState<InvoiceItem[]>([]);
   const [colPaidAmount, setColPaidAmount] = useState<string>('0');
+  const [colPaymentMethod, setColPaymentMethod] = useState<string>('ক্যাশ');
   const [colComment, setColComment] = useState('');
   const [colSelectedHeadId, setColSelectedHeadId] = useState('');
   const [colDiscountCode, setColDiscountCode] = useState<string>('');
   const [colPromoDiscount, setColPromoDiscount] = useState<number>(0);
+  const [invoicePaymentMethodFilter, setInvoicePaymentMethodFilter] = useState<string>('all');
 
   // Row Selection & Master Actions State
   const [selectedRowIndices, setSelectedRowIndices] = useState<number[]>([]);
@@ -1035,7 +1039,8 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
       status,
       month: colMonth,
       year: colYear,
-      comment: colComment
+      comment: colComment,
+      paymentMethod: colPaymentMethod || 'ক্যাশ'
     };
 
     await updateData('invoices', newInvoice);
@@ -1047,6 +1052,7 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
     setColStudentId('');
     setColItems([]);
     setColComment('');
+    setColPaymentMethod('ক্যাশ');
     alert('ইনভয়েসটি সফলভাবে সংরক্ষণ করা হয়েছে!');
     setActiveTab('invoices');
   };
@@ -1147,6 +1153,7 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
   const [editFormMonth, setEditFormMonth] = useState<string>('');
   const [editFormYear, setEditFormYear] = useState<string>('');
   const [editFormPaidAmount, setEditFormPaidAmount] = useState<string>('0');
+  const [editFormPaymentMethod, setEditFormPaymentMethod] = useState<string>('ক্যাশ');
   const [editFormDiscount, setEditFormDiscount] = useState<string>('0');
   const [editFormComment, setEditFormComment] = useState<string>('');
   const [editFormItems, setEditFormItems] = useState<InvoiceItem[]>([]);
@@ -1178,6 +1185,7 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
     setEditFormMonth(editingInvoice.month || 'আগস্ট');
     setEditFormYear(editingInvoice.year || new Date().getFullYear().toString());
     setEditFormPaidAmount(String(editingInvoice.paidAmount || 0));
+    setEditFormPaymentMethod(editingInvoice.paymentMethod || 'ক্যাশ');
     setEditFormDiscount(String(editingInvoice.discount || 0));
     setEditFormComment(editingInvoice.comment || '');
     setEditFormItems(JSON.parse(JSON.stringify(editingInvoice.items || [])));
@@ -1214,7 +1222,8 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
       paidAmount: paid,
       dueAmount: due,
       status,
-      comment: editFormComment
+      comment: editFormComment,
+      paymentMethod: editFormPaymentMethod || 'ক্যাশ'
     };
 
     await updateData('invoices', updatedInvoice);
@@ -1335,10 +1344,11 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
 
       const matchesStatus = invoiceStatusFilter === 'all' || inv.status === invoiceStatusFilter;
       const matchesMonth = invoiceMonthFilter === 'all' || getInvoiceMonthName(inv) === invoiceMonthFilter;
+      const matchesMethod = invoicePaymentMethodFilter === 'all' || (inv.paymentMethod || 'ক্যাশ') === invoicePaymentMethodFilter;
 
-      return matchesSearch && matchesStatus && matchesMonth;
+      return matchesSearch && matchesStatus && matchesMonth && matchesMethod;
     });
-  }, [invoices, invoiceSearch, invoiceStatusFilter, invoiceMonthFilter]);
+  }, [invoices, invoiceSearch, invoiceStatusFilter, invoiceMonthFilter, invoicePaymentMethodFilter]);
 
   // Student ledger records for Profile View (Module B)
   const studentLedger = useMemo(() => {
@@ -2333,6 +2343,27 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
                       )}
                     </div>
 
+                    {/* 7.5. পেমেন্টের ধরন / মাধ্যম (Payment Method) */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-text-light/60 uppercase tracking-widest px-1 flex items-center justify-between">
+                        <span>পেমেন্টের ধরন / মাধ্যম</span>
+                        <span className="text-[9px] font-bold text-primary">(ক্যাশ/ব্যাংক/বিকাশ/ইত্যাদি)</span>
+                      </label>
+                      <select
+                        className="w-full px-3 py-2.5 bg-step-bg border border-border-main focus:border-primary rounded-xl font-bold text-xs text-text-main outline-none cursor-pointer"
+                        value={colPaymentMethod}
+                        onChange={(e) => setColPaymentMethod(e.target.value)}
+                      >
+                        <option value="ক্যাশ">💵 ক্যাশ (Cash)</option>
+                        <option value="ব্যাংক">🏦 ব্যাংক ট্রান্সফার (Bank Transfer)</option>
+                        <option value="বিকাশ">📱 বিকাশ (bKash)</option>
+                        <option value="নগদ">📱 নগদ (Nagad)</option>
+                        <option value="রকেট">📱 রকেট (Rocket)</option>
+                        <option value="উপায়">📱 উপায় (Upay)</option>
+                        <option value="চেক">📄 ব্যাংক চেক (Cheque)</option>
+                      </select>
+                    </div>
+
                     {/* 8. নেট বকেয়া (Net Remaining Due) */}
                     <div className="flex justify-between items-center p-3 bg-card rounded-xl border border-border-main">
                       <div>
@@ -2445,6 +2476,24 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
                   </select>
                 </div>
 
+                <div className="flex items-center gap-2 bg-card px-3 py-2 rounded-xl border border-border-main shadow-sm">
+                  <span className="text-xs font-bold text-text-light/70 whitespace-nowrap">মাধ্যম:</span>
+                  <select
+                    value={invoicePaymentMethodFilter}
+                    onChange={(e) => setInvoicePaymentMethodFilter(e.target.value)}
+                    className="bg-transparent text-xs font-black outline-none text-text-main cursor-pointer"
+                  >
+                    <option value="all">সকল মাধ্যম</option>
+                    <option value="ক্যাশ">💵 ক্যাশ</option>
+                    <option value="ব্যাংক">🏦 ব্যাংক</option>
+                    <option value="বিকাশ">📱 বিকাশ</option>
+                    <option value="নগদ">📱 নগদ</option>
+                    <option value="রকেট">📱 রকেট</option>
+                    <option value="উপায়">📱 উপায়</option>
+                    <option value="চেক">📄 চেক</option>
+                  </select>
+                </div>
+
                 <div className="flex bg-card p-1 rounded-xl border border-border-main shadow-sm gap-1 flex-wrap">
                   {([
                     { key: 'all', label: 'সবগুলো' },
@@ -2475,6 +2524,7 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
                     <th className="py-4 px-4 text-xs font-black">তারিখ</th>
                     <th className="py-4 px-4 text-xs font-black">শিক্ষার্থীর নাম</th>
                     <th className="py-4 px-4 text-xs font-black">খাত / আইটেম</th>
+                    <th className="py-4 px-4 text-xs font-black">মাধ্যম</th>
                     <th className="py-4 px-4 text-xs font-black">মোট বিল</th>
                     <th className="py-4 px-4 text-xs font-black">ছাড়</th>
                     <th className="py-4 px-4 text-xs font-black">পরিশোধিত</th>
@@ -2499,6 +2549,11 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
                       <td className="py-4 px-4">
                         <span className="text-xs font-semibold text-text-light/75">
                           {inv.items.map(i => i.headName).join(', ')}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4">
+                        <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-step-bg border border-border-main text-text-main whitespace-nowrap">
+                          {inv.paymentMethod || 'ক্যাশ'}
                         </span>
                       </td>
                       <td className="py-4 px-4 text-xs font-black text-text-main">৳{enToBnNumber(inv.netAmount)}</td>
@@ -2562,7 +2617,7 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
 
                   {filteredInvoices.length === 0 && (
                     <tr>
-                      <td colSpan={10} className="py-16 text-center text-sm font-black text-text-light/40 italic">
+                      <td colSpan={11} className="py-16 text-center text-sm font-black text-text-light/40 italic">
                         কোন ইনভয়েস রেকর্ড পাওয়া যায়নি।
                       </td>
                     </tr>
@@ -2799,230 +2854,20 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
         )}
       </div>
 
-      {/* --- PREMIUM DUAL-COPY RECEIPT OVERLAY (PDF / Print layout) --- */}
+      {/* --- FULL PAGE INVOICE VIEWER --- */}
       <AnimatePresence>
         {activeInvoice && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 overflow-y-auto bg-black/60 backdrop-blur-xs select-none print:static print:bg-white print:p-0 print:block print:inset-auto print:overflow-visible">
-            
-            {/* Global print styles specifically for this modal */}
-            <style>
-              {`
-                @media print {
-                  body * {
-                    visibility: hidden;
-                  }
-                  #printable-receipt-container, #printable-receipt-container * {
-                    visibility: visible;
-                  }
-                  #printable-receipt-container {
-                    position: absolute;
-                    left: 0;
-                    top: 0;
-                    width: 100%;
-                    background: white;
-                    padding: 0 !important;
-                    margin: 0 !important;
-                    box-shadow: none !important;
-                    border: none !important;
-                  }
-                  @page {
-                    size: A4 portrait;
-                    margin: 10mm;
-                  }
-                }
-              `}
-            </style>
-
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.93 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.93 }}
-              className="relative w-full max-w-4xl bg-white border border-gray-200 shadow-2xl z-10 h-full sm:h-auto overflow-y-auto p-4 sm:p-8 rounded-none sm:rounded-[2rem] print:rounded-none print:shadow-none print:border-none print:h-auto print:overflow-visible"
-              id="printable-receipt-container"
-            >
-              
-              {/* Receipt Modal Controller (Hidden when printing) */}
-              <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-100 print:hidden text-left">
-                <div>
-                  <h3 className="text-base font-black text-gray-800">পেমেন্ট রসিদ ভিউয়ার (প্রিন্ট ফ্রেন্ডলি)</h3>
-                  <p className="text-[9px] text-gray-400 font-bold uppercase tracking-wider">A4 paper format</p>
-                </div>
-                <div className="flex gap-2">
-                  <button 
-                    onClick={handleDownloadA5PDF}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
-                  >
-                    <Download size={14} /> PDF ডাউনলোড
-                  </button>
-                  <button 
-                    onClick={() => window.print()}
-                    className="px-4 py-2 bg-primary text-white rounded-xl text-xs font-black flex items-center gap-2 hover:scale-103 transition-all cursor-pointer"
-                  >
-                    <Printer size={14} /> প্রিন্ট/ডাউনলোড করুন
-                  </button>
-                  <button 
-                    onClick={() => setActiveInvoice(null)}
-                    className="px-4 py-2 bg-gray-100 text-gray-600 hover:bg-gray-200 rounded-xl text-xs font-black cursor-pointer transition-all"
-                  >
-                    বন্ধ করুন
-                  </button>
-                </div>
-              </div>
-
-              {/* Printable Content */}
-              <div className="space-y-12">
-                {[
-                  { id: 'office', label: 'অফিস কপি' },
-                  { id: 'student', label: 'শিক্ষার্থী কপি' }
-                ].map((copy, copyIdx) => (
-                  <div key={copyIdx} className={cn(
-                    "p-6 sm:p-8 border-2 border-gray-200 rounded-3xl relative bg-white",
-                    copyIdx > 0 ? "border-t-[3px] border-dashed border-t-gray-300 rounded-t-none pt-12 print:mt-8" : ""
-                  )}>
-                    
-                    {/* Copy Name Badge */}
-                    <div className="absolute -top-3.5 right-8 bg-gray-100 px-4 py-1.5 border border-gray-200 rounded-full text-[10px] font-black text-gray-600 uppercase tracking-widest shadow-sm">
-                      {copy.label}
-                    </div>
-
-                    {/* Receipt Header */}
-                    <div className="flex justify-between items-start mb-8">
-                      <div className="flex items-center gap-4">
-                        {madrasahBranding?.logoUrl ? (
-                          <img 
-                            src={madrasahBranding.logoUrl} 
-                            alt="Logo" 
-                            className="w-12 h-12 object-contain rounded-xl border border-gray-100 p-0.5 shadow-sm"
-                            referrerPolicy="no-referrer"
-                          />
-                        ) : (
-                          <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center text-white font-black text-xl shadow-md">
-                            ম
-                          </div>
-                        )}
-                          <div>
-                            <h2 className="text-lg font-black text-gray-900 leading-tight">
-                              {madrasahBranding?.madrasahName || 'দারুল উলূম মাদানিয়া (মহিলা) মাদরাসা'}
-                            </h2>
-                            <p className="text-[10px] font-bold text-gray-500 mt-1.5 uppercase tracking-widest">নয়া কান্দারগাঁও, লুটেরচর-৩৫১৬, মেঘনা, কুমিল্লা।</p>
-                          </div>
-                      </div>
-                      <div className="text-right">
-                        <h4 className="text-sm font-black text-primary leading-none uppercase tracking-widest py-1.5 px-4 bg-primary/10 rounded-xl border border-primary/20 inline-block">মানি রসিদ (Receipt)</h4>
-                        <p className="text-[10px] font-mono font-bold text-gray-500 mt-2">ইনভয়েস: <span className="text-gray-900 font-black text-xs">{activeInvoice.invoiceNo}</span></p>
-                      </div>
-                    </div>
-
-                    {/* Student Info rows */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-y-4 gap-x-6 mb-8 text-xs border-y border-gray-100 py-5">
-                      <div>
-                        <span className="text-gray-400 font-bold text-[10px] uppercase tracking-widest block mb-0.5">শিক্ষার্থীর নাম</span>
-                        <span className="font-black text-gray-900 text-sm">{activeInvoice.studentName}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-400 font-bold text-[10px] uppercase tracking-widest block mb-0.5">জামাত ও শাখা</span>
-                        <span className="font-black text-gray-900 text-sm">{activeInvoice.studentClass} <span className="text-gray-400 font-semibold">(শাখা: {activeInvoice.studentBranch})</span></span>
-                      </div>
-                      <div>
-                        <span className="text-gray-400 font-bold text-[10px] uppercase tracking-widest block mb-0.5">রোল ও আইডি</span>
-                        <span className="font-black text-gray-900 text-sm">রোল: {enToBnNumber(activeInvoice.studentRoll)} <span className="text-primary mx-1">|</span> #{enToBnNumber(String(activeInvoice.studentId || '').slice(-6))}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-400 font-bold text-[10px] uppercase tracking-widest block mb-0.5">তারিখ ও সময়</span>
-                        <span className="font-black text-gray-900 text-sm">{activeInvoice.date} <span className="text-gray-400 font-semibold">({activeInvoice.month}, {activeInvoice.year})</span></span>
-                      </div>
-                    </div>
-
-                    {/* Items table */}
-                    <table className="w-full border-collapse mb-8 text-xs">
-                      <thead>
-                        <tr className="bg-gray-50/80 border-y border-gray-200">
-                          <th className="py-3 px-4 text-left font-black text-gray-500 uppercase tracking-widest text-[10px]">ক্রমিক</th>
-                          <th className="py-3 px-4 text-left font-black text-gray-500 uppercase tracking-widest text-[10px]">ফি-এর খাত</th>
-                          <th className="py-3 px-4 text-right font-black text-gray-500 uppercase tracking-widest text-[10px]">নির্ধারিত</th>
-                          <th className="py-3 px-4 text-right font-black text-gray-500 uppercase tracking-widest text-[10px]">ছাড়</th>
-                          <th className="py-3 px-4 text-right font-black text-gray-900 uppercase tracking-widest text-[10px] bg-gray-100">আদায়কৃত</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {activeInvoice.items.map((item, idx) => (
-                          <tr key={idx} className="hover:bg-gray-50/50 transition-colors">
-                            <td className="py-3 px-4 font-bold text-gray-400 text-[10px]">{enToBnNumber(idx + 1)}</td>
-                            <td className="py-3 px-4 font-black text-gray-800">{item.headName}</td>
-                            <td className="py-3 px-4 text-right font-bold text-gray-500">৳{enToBnNumber(item.defaultRate || item.amount)}</td>
-                            <td className="py-3 px-4 text-right font-bold text-indigo-400">৳{enToBnNumber(item.discount || 0)}</td>
-                            <td className="py-3 px-4 text-right font-black text-gray-900 bg-gray-50/50">৳{enToBnNumber(item.amount)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-
-                    {/* Calculations summary row */}
-                    <div className="flex flex-col md:flex-row justify-between items-start gap-6 text-xs border-t-2 border-gray-100 pt-6 mb-8">
-                      <div className="w-full md:max-w-xs space-y-2">
-                        <div className="bg-gray-50/80 p-3.5 rounded-2xl border border-gray-100">
-                          <span className="text-gray-400 font-bold block mb-1 text-[10px] uppercase tracking-widest">কথায় (In Words)</span>
-                          <p className="text-xs font-black text-gray-800">
-                            {numberToBanglaWords(activeInvoice.paidAmount)}
-                          </p>
-                        </div>
-                        {activeInvoice.comment && (
-                          <div className="bg-gray-50/50 p-2.5 rounded-xl border border-gray-100">
-                            <span className="text-gray-400 font-bold block mb-0.5 text-[9px] uppercase tracking-widest">মন্তব্য</span>
-                            <p className="text-[11px] font-semibold text-gray-600">
-                              {activeInvoice.comment}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                      
-                      <div className="w-full md:w-72 space-y-2.5 text-right font-semibold">
-                        <div className="flex justify-between items-center text-gray-500">
-                          <span>আইটেম মোট:</span>
-                          <span className="text-gray-800 font-black">৳{enToBnNumber(activeInvoice.subtotal)}</span>
-                        </div>
-                        {activeInvoice.previousDue > 0 && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-gray-500">পূর্ববর্তী বকেয়া:</span>
-                            <span className="text-red-500 font-black bg-red-500/10 px-2 py-0.5 rounded-md">৳{enToBnNumber(activeInvoice.previousDue)}</span>
-                          </div>
-                        )}
-                        {activeInvoice.discount > 0 && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-indigo-400">সর্বমোট ছাড়:</span>
-                            <span className="text-indigo-500 font-black">৳{enToBnNumber(activeInvoice.discount)}</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between items-center text-sm font-black pt-3 border-t-2 border-gray-900 text-gray-900">
-                          <span>পরিশোধিত টাকা:</span>
-                          <span className="text-lg">৳{enToBnNumber(activeInvoice.paidAmount)}</span>
-                        </div>
-                        <div className="flex justify-between items-center font-black text-gray-500 pt-1">
-                          <span>অবशिष्ट বকেয়া:</span>
-                          <span className="text-red-500">৳{enToBnNumber(activeInvoice.dueAmount)}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Signatures Row */}
-                    <div className="flex justify-between items-end pt-12 text-[10px] text-gray-400 font-black uppercase tracking-widest select-none px-4">
-                      <div className="text-center w-28">
-                        <div className="border-t-2 border-gray-200 pt-2 text-gray-500">শিক্ষার্থীর স্বাক্ষর</div>
-                      </div>
-                      <div className="text-center w-28">
-                        <div className="border-t-2 border-gray-200 pt-2 text-gray-500">হিসাবরক্ষক</div>
-                      </div>
-                      <div className="text-center w-28">
-                        <div className="border-t-2 border-gray-200 pt-2 text-gray-500">ভারপ্রাপ্ত মুহতামিম</div>
-                      </div>
-                    </div>
-
-                  </div>
-                ))}
-              </div>
-            </motion.div>
+          <div className="fixed inset-0 z-[100] bg-white overflow-hidden flex flex-col print:static print:bg-white print:overflow-visible print:block print:inset-auto">
+            <InvoiceViewer 
+              invoice={activeInvoice}
+              madrasahBranding={madrasahBranding}
+              onClose={() => setActiveInvoice(null)}
+            />
           </div>
-        )}</AnimatePresence>
+        )}
+      </AnimatePresence>
+
+
 
       {/* --- PASSWORD VERIFICATION MODAL FOR DELETE --- */}
       <AnimatePresence>
@@ -3324,6 +3169,22 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
                         className="w-full px-3 py-2 bg-card border border-border-main rounded-xl font-bold outline-none focus:ring-2 focus:ring-primary/20 text-text-main"
                         required
                       />
+                    </div>
+                    <div>
+                      <label className="font-black text-text-main block mb-1">পেমেন্টের ধরন / মাধ্যম:</label>
+                      <select
+                        value={editFormPaymentMethod}
+                        onChange={(e) => setEditFormPaymentMethod(e.target.value)}
+                        className="w-full px-3 py-2 bg-card border border-border-main rounded-xl font-bold outline-none focus:ring-2 focus:ring-primary/20 text-text-main cursor-pointer"
+                      >
+                        <option value="ক্যাশ">💵 ক্যাশ (Cash)</option>
+                        <option value="ব্যাংক">🏦 ব্যাংক ট্রান্সফার (Bank Transfer)</option>
+                        <option value="বিকাশ">📱 বিকাশ (bKash)</option>
+                        <option value="নগদ">📱 নগদ (Nagad)</option>
+                        <option value="রকেট">📱 রকেট (Rocket)</option>
+                        <option value="উপায়">📱 উপায় (Upay)</option>
+                        <option value="চেক">📄 ব্যাংক চেক (Cheque)</option>
+                      </select>
                     </div>
                   </div>
 

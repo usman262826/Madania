@@ -187,7 +187,7 @@ export interface AttendanceSettings {
   };
   messaging: {
     enabled: boolean;
-    smsProvider: 'mock_gateway' | 'greenweb' | 'bulk_sms_bd' | 'custom_api';
+    smsProvider: 'sms_net_bd' | 'greenweb' | 'bulk_sms_bd' | 'custom_api' | 'mock_gateway';
     providerApiKey?: string;
     senderId?: string;
     rules: {
@@ -500,9 +500,9 @@ export const DEFAULT_ATTENDANCE_SETTINGS: AttendanceSettings = {
   },
   messaging: {
     enabled: true,
-    smsProvider: 'mock_gateway',
-    providerApiKey: '',
-    senderId: 'ALMADANIA',
+    smsProvider: 'sms_net_bd',
+    providerApiKey: 'a23Hnfiv06596m0p8r06RU8Tcs6eI49JQDL9T3Ug',
+    senderId: '',
     rules: {
       late: true,
       absent: true,

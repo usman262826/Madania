@@ -67,8 +67,11 @@ import {
   subscribeToAttendanceUpdates, 
   getSentMessageLogs, 
   addSmsBundle,
+  getAttendanceSettings,
+  clearSentMessageLogs,
   SmsAccountStats 
 } from "../../services/attendanceEngine";
+import { getSmsNetBdBalance, SmsBalanceResult } from "../../services/smsService";
 import { SentMessageLog } from "../../types/attendance";
 import { Send, Radio, Zap, Check, CheckCheck, RefreshCw } from "lucide-react";
 
@@ -1571,12 +1574,41 @@ export const Analytics: React.FC<AnalyticsProps> = ({
   const [sentLogs, setSentLogs] = React.useState<SentMessageLog[]>(() => getSentMessageLogs());
   const [smsFilter, setSmsFilter] = React.useState<string>('all');
   const [smsSearch, setSmsSearch] = React.useState<string>('');
+  const [liveSmsBalance, setLiveSmsBalance] = React.useState<number | null>(null);
+  const [isLoadingLiveBalance, setIsLoadingLiveBalance] = React.useState<boolean>(false);
   const [showRechargeModal, setShowRechargeModal] = React.useState<boolean>(false);
   const [rechargeAmount, setRechargeAmount] = React.useState<number>(1000);
   const [showJamatAttendanceTable, setShowJamatAttendanceTable] = React.useState<boolean>(true);
   const [showAcademicMessageLedger, setShowAcademicMessageLedger] = React.useState<boolean>(false);
   const [showFinancialLedger, setShowFinancialLedger] = React.useState<boolean>(false);
   const [showOverdueAlerts, setShowOverdueAlerts] = React.useState<boolean>(false);
+
+  const fetchLiveSmsBalance = React.useCallback(async () => {
+    try {
+      setIsLoadingLiveBalance(true);
+      const settings = getAttendanceSettings();
+      const res = await getSmsNetBdBalance(settings.messaging.providerApiKey);
+      if (res.success && res.error === 0) {
+        setLiveSmsBalance(res.balance);
+      }
+    } catch (e) {
+      console.warn('Could not load live SMS balance:', e);
+    } finally {
+      setIsLoadingLiveBalance(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    fetchLiveSmsBalance();
+  }, [fetchLiveSmsBalance]);
+
+  const handleClearDashboardSmsLogs = () => {
+    if (window.confirm('আপনি কি নিশ্চিত যে সকল ডামি ও পূর্ববর্তী SMS লগ মুছে ফেলতে চান?')) {
+      clearSentMessageLogs();
+      setSentLogs([]);
+      setSmsStats(getSmsAccountStats());
+    }
+  };
 
   // Subscribe to live background machine punch updates and messaging engine updates
   React.useEffect(() => {
@@ -2515,7 +2547,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({
               </div>
             </motion.div>
 
-            {/* Card 4: মেসেজ ও এসএমএস ব্যালেন্স (খরচ হওয়া ও একাউন্টে থাকা মেসেজ সংখ্যা) */}
+            {/* Card 4: মেসেজ ও এসএমএস ব্যালেন্স (লাইভ SMS.NET.BD API ব্যালেন্স ও প্রেরিত সংখ্যা) */}
             <motion.div
               whileHover={{ y: -4 }}
               onClick={() => setActiveTab?.("attendance-messaging")}
@@ -2525,24 +2557,25 @@ export const Analytics: React.FC<AnalyticsProps> = ({
                 <div className="bg-teal-500/10 text-teal-600 dark:text-teal-400 p-3 rounded-2xl group-hover:scale-110 transition-transform duration-300">
                   <MessageSquare size={20} className="stroke-[2.5]" />
                 </div>
-                <div className="flex items-center gap-1 bg-teal-500/10 border border-teal-500/20 px-2.5 py-1 rounded-full text-[10px] font-black text-teal-600 dark:text-teal-400">
-                  <span>SMS গেটওয়ে</span>
+                <div className="flex items-center gap-1.5 bg-teal-500/10 border border-teal-500/20 px-2.5 py-1 rounded-full text-[10px] font-black text-teal-600 dark:text-teal-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse"></span>
+                  <span>SMS.NET.BD লাইভ</span>
                 </div>
               </div>
               <div className="mt-2.5">
                 <p className="text-text-light/50 font-bold text-[10px] uppercase tracking-wider mb-0.5">মেসেজ ও এসএমএস ব্যালেন্স</p>
                 <div className="flex items-baseline gap-2 flex-wrap">
                   <div className="flex items-baseline gap-1">
-                    <span className="text-[11px] font-bold text-text-light/70">অবশিষ্ট:</span>
+                    <span className="text-[11px] font-bold text-text-light/70">API ব্যালেন্স:</span>
                     <h2 className="text-xl sm:text-2xl font-black text-primary tracking-tight">
-                      {enToBnNumber(smsStats.remainingBalance.toString())} টি
+                      {liveSmsBalance !== null ? `${enToBnNumber(liveSmsBalance.toString())} ৳` : `${enToBnNumber(smsStats.remainingBalance.toString())} টি`}
                     </h2>
                   </div>
                   <span className="text-border-main text-sm font-light">|</span>
                   <div className="flex items-baseline gap-1">
-                    <span className="text-[11px] font-bold text-text-light/70">খরচ:</span>
-                    <h2 className="text-base sm:text-lg font-black text-amber-600 dark:text-amber-400 tracking-tight">
-                      {enToBnNumber(smsStats.usedCount.toString())} টি
+                    <span className="text-[11px] font-bold text-text-light/70">প্রেরিত:</span>
+                    <h2 className="text-base sm:text-lg font-black text-teal-600 dark:text-teal-400 tracking-tight">
+                      {enToBnNumber(sentLogs.length.toString())} টি
                     </h2>
                   </div>
                 </div>
@@ -2579,20 +2612,38 @@ export const Analytics: React.FC<AnalyticsProps> = ({
                 {/* Header & SMS Metrics Ribbon */}
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-border-main/40 pb-4 pt-2">
                   <div>
-                    <p className="text-xs text-text-light/70 font-medium">
-                      বায়োমেট্রিক হাজিরা পাঞ্চ, লেট এলার্ট, অনুপস্থিতি ও বকেয়া ফি সংক্রান্ত সকল অটোমেটিক এসএমএস স্ট্যাটাস
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        SMS.NET.BD API সক্রিয়
+                      </span>
+                    </div>
+                    <p className="text-xs text-text-light/70 font-medium mt-1">
+                      বায়োমেট্রিক হাজিরা পাঞ্চ, লেট এলার্ট, অনুপস্থিতি ও নোটিফিকেশনের লাইভ এসএমএস হিস্ট্রি
                     </p>
                   </div>
 
                   {/* Action Buttons */}
                   <div className="flex items-center gap-2 flex-wrap">
                     <button
-                      onClick={() => setShowRechargeModal(true)}
-                      className="px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer"
+                      onClick={fetchLiveSmsBalance}
+                      disabled={isLoadingLiveBalance}
+                      className="px-3 py-2 bg-muted/60 hover:bg-muted text-text-main border border-border-main/50 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                      title="API ব্যালেন্স রিফ্রেশ করুন"
                     >
-                      <Plus size={14} />
-                      <span>এসএমএস রিচার্জ</span>
+                      <RefreshCw size={14} className={isLoadingLiveBalance ? "animate-spin text-primary" : ""} />
+                      <span>{isLoadingLiveBalance ? "লোড হচ্ছে..." : "ব্যালেন্স রিফ্রেশ"}</span>
                     </button>
+                    {sentLogs.length > 0 && (
+                      <button
+                        onClick={handleClearDashboardSmsLogs}
+                        className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 border border-rose-500/20 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                        title="লগ হিস্ট্রি পরিষ্কার করুন"
+                      >
+                        <Trash2 size={14} />
+                        <span>লগ মুছুন</span>
+                      </button>
+                    )}
                     <button
                       onClick={() => setActiveTab?.("attendance-messaging")}
                       className="px-3 py-2 bg-primary hover:bg-primary/90 text-white rounded-xl text-xs font-black transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
@@ -2605,22 +2656,16 @@ export const Analytics: React.FC<AnalyticsProps> = ({
 
                 {/* Quick SMS Summary Meters */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-              <div className="p-3 bg-muted/40 rounded-xl border border-border-main/40">
-                <p className="text-[10px] font-bold text-text-light/70 uppercase">মোট এসএমএস প্যাকেজ</p>
-                <p className="text-lg font-black text-text-main mt-0.5">
-                  {enToBnNumber(smsStats.totalPurchased.toString())} <span className="text-xs font-normal">টি</span>
-                </p>
-              </div>
-              <div className="p-3 bg-amber-500/5 rounded-xl border border-amber-500/20">
-                <p className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase">খরচ হওয়া মেসেজ</p>
-                <p className="text-lg font-black text-amber-600 dark:text-amber-400 mt-0.5">
-                  {enToBnNumber(smsStats.usedCount.toString())} <span className="text-xs font-normal">টি</span>
-                </p>
-              </div>
               <div className="p-3 bg-primary/5 rounded-xl border border-primary/20">
-                <p className="text-[10px] font-bold text-primary uppercase">একাউন্টে থাকা ব্যালেন্স</p>
+                <p className="text-[10px] font-bold text-primary uppercase">লাইভ API ব্যালেন্স</p>
                 <p className="text-lg font-black text-primary mt-0.5">
-                  {enToBnNumber(smsStats.remainingBalance.toString())} <span className="text-xs font-normal">টি</span>
+                  {liveSmsBalance !== null ? `${enToBnNumber(liveSmsBalance.toString())} BDT` : 'লোড হচ্ছে...'}
+                </p>
+              </div>
+              <div className="p-3 bg-muted/40 rounded-xl border border-border-main/40">
+                <p className="text-[10px] font-bold text-text-light/70 uppercase">মোট প্রেরিত মেসেজ</p>
+                <p className="text-lg font-black text-text-main mt-0.5">
+                  {enToBnNumber(sentLogs.length.toString())} <span className="text-xs font-normal">টি</span>
                 </p>
               </div>
               <div className="p-3 bg-teal-500/5 rounded-xl border border-teal-500/20">
@@ -2629,8 +2674,14 @@ export const Analytics: React.FC<AnalyticsProps> = ({
                   {enToBnNumber(smsStats.sentToday.toString())} <span className="text-xs font-normal">টি</span>
                 </p>
               </div>
+              <div className="p-3 bg-blue-500/5 rounded-xl border border-blue-500/20">
+                <p className="text-[10px] font-bold text-blue-700 dark:text-blue-400 uppercase">চলতি মাসের প্রেরিত</p>
+                <p className="text-lg font-black text-blue-600 dark:text-blue-400 mt-0.5">
+                  {enToBnNumber(smsStats.sentThisMonth.toString())} <span className="text-xs font-normal">টি</span>
+                </p>
+              </div>
               <div className="p-3 bg-emerald-500/5 rounded-xl border border-emerald-500/20 col-span-2 sm:col-span-1">
-                <p className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase">ডেলিভারি সাকসেস</p>
+                <p className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase">ডেলিভারি সফলতা</p>
                 <p className="text-lg font-black text-emerald-600 dark:text-emerald-400 mt-0.5">
                   {enToBnNumber(smsStats.deliveryRate.toString())}% <span className="text-xs font-normal">সফল</span>
                 </p>
@@ -2686,14 +2737,15 @@ export const Analytics: React.FC<AnalyticsProps> = ({
                       <th className="py-2.5 px-3">মেসেজের ধরন</th>
                       <th className="py-2.5 px-3">প্রেরণের সময়</th>
                       <th className="py-2.5 px-3">মেসেজ বিবরণ</th>
+                      <th className="py-2.5 px-3">রিকোয়েস্ট আইডি</th>
                       <th className="py-2.5 px-3 text-center">স্ট্যাটাস</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border-main/40 text-text-main">
                     {filteredSentLogs.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="py-8 text-center text-text-light/60 font-medium">
-                          কোনো মেসেজ রেকর্ড পাওয়া যায়নি। বায়োমেট্রিক পাঞ্চ হলে স্বয়ংক্রিয়ভাবে মেসেজ জমা হবে।
+                        <td colSpan={8} className="py-8 text-center text-text-light/60 font-medium">
+                          বর্তমানে কোনো মেসেজ পাঠানো হয়নি। বায়োমেট্রিক পাঞ্চ বা নোটিফিকেশন পাঠানো হলে SMS.NET.BD API এর মাধ্যমে প্রেরিত লাইভ রেকর্ড এখানে স্বয়ংক্রিয়ভাবে প্রদর্শিত হবে।
                         </td>
                       </tr>
                     ) : (
@@ -2733,6 +2785,9 @@ export const Analytics: React.FC<AnalyticsProps> = ({
                               <p className="text-[11px] text-text-main line-clamp-1" title={log.content}>
                                 {log.content}
                               </p>
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-[10px] text-text-light">
+                              {log.messageId ? log.messageId : 'API-LIVE'}
                             </td>
                             <td className="py-2.5 px-3 text-center">
                               <span className={cn(

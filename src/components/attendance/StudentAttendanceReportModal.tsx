@@ -15,6 +15,7 @@ import {
   Award, 
   Phone, 
   ShieldCheck, 
+  Edit3,
   ChevronRight, 
   RefreshCw, 
   FileSpreadsheet, 
@@ -464,9 +465,31 @@ export const StudentAttendanceReportModal: React.FC<StudentAttendanceReportModal
                        singleDayRecord?.status === 'temporarily_cancelled' ? 'সাময়িক বাতিল' :
                        'অনুপস্থিত (Absent)'}
                     </span>
-                    <span className="text-[10px] text-[var(--color-text-light)]">
+                    <span className="text-[10px] text-[var(--color-text-light)] block">
                       {selectedSingleDate === todayStr ? 'আজকের দিবস' : formatDateToDDMMYYYY(selectedSingleDate)}
                     </span>
+                    {(() => {
+                      const isManual = singleDayRecord?.markedBy === 'ADMIN_MANUAL' || (singleDayRecord?.timeline && singleDayRecord.timeline.some(t => t.type === 'manual'));
+                      const isDevice = !isManual && (singleDayRecord?.totalPunches && singleDayRecord.totalPunches > 0 || (singleDayRecord?.markedBy === 'TIPSOI_API' && (singleDayRecord?.status === 'present' || singleDayRecord?.status === 'late')));
+
+                      if (isDevice) {
+                        return (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-500/10 text-teal-700 dark:text-teal-300 border border-teal-500/30 whitespace-nowrap mt-1.5 shadow-2xs">
+                            <ShieldCheck size={11} className="text-teal-600 dark:text-teal-400" />
+                            <span>ডিভাইস ভেরিফাইড</span>
+                          </span>
+                        );
+                      }
+                      if (isManual) {
+                        return (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 whitespace-nowrap mt-1.5 shadow-2xs">
+                            <Edit3 size={11} className="text-amber-600 dark:text-amber-400" />
+                            <span>ম্যানুয়াল এন্ট্রি</span>
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                 </div>
 
@@ -706,6 +729,7 @@ export const StudentAttendanceReportModal: React.FC<StudentAttendanceReportModal
                         <th className="p-2.5">সর্বশেষ প্রস্থান (Out)</th>
                         <th className="p-2.5 text-center">পাঞ্চ সংখ্যা</th>
                         <th className="p-2.5 text-center">স্ট্যাটাস</th>
+                        <th className="p-2.5 text-center">উৎস</th>
                         <th className="p-2.5 text-center">দেরি (মি.)</th>
                         <th className="p-2.5 text-center">মার্ক</th>
                         <th className="p-2.5 text-right">পাঞ্চ বিবরণ</th>
@@ -756,6 +780,32 @@ export const StudentAttendanceReportModal: React.FC<StudentAttendanceReportModal
                                 )}>
                                   {status === 'present' ? 'উপস্থিত' : status === 'late' ? 'দেরি' : 'অনুপস্থিত'}
                                 </span>
+                              </td>
+                              <td className="p-2.5 text-center">
+                                {(() => {
+                                  const isManual = rec?.markedBy === 'ADMIN_MANUAL' || (rec?.timeline && rec.timeline.some(t => t.type === 'manual'));
+                                  const isDevice = !isManual && (totalPunches > 0 || (rec?.markedBy === 'TIPSOI_API' && (status === 'present' || status === 'late')));
+
+                                  if (isDevice) {
+                                    return (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-teal-500/10 text-teal-700 dark:text-teal-300 border border-teal-500/30 whitespace-nowrap shadow-2xs">
+                                        <ShieldCheck size={10} className="text-teal-600 dark:text-teal-400" />
+                                        <span>ডিভাইস</span>
+                                      </span>
+                                    );
+                                  }
+                                  if (isManual) {
+                                    return (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 whitespace-nowrap shadow-2xs">
+                                        <Edit3 size={10} className="text-amber-600 dark:text-amber-400" />
+                                        <span>ম্যানুয়াল</span>
+                                      </span>
+                                    );
+                                  }
+                                  return (
+                                    <span className="text-[10px] text-slate-400">—</span>
+                                  );
+                                })()}
                               </td>
                               <td className="p-2.5 text-center font-mono">
                                 {rec?.isLate ? (

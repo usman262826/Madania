@@ -54,7 +54,7 @@ import {
   AttendanceAuditLog
 } from '../../types/attendance';
 import { useData } from '../../contexts/DataContext';
-import { enToBnNumber, cn, isClassMatch, formatDateToDDMMYYYY } from '../../lib/utils';
+import { enToBnNumber, cn, isClassMatch, formatDateToDDMMYYYY, getDepartmentForClass } from '../../lib/utils';
 import { calculateStudentMark, generateStudentAttendanceSMS } from '../../utils/attendanceCalculators';
 import { TipsoiSyncModal } from './TipsoiSyncModal';
 import { AttendanceMessaging } from './AttendanceMessaging';
@@ -103,7 +103,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
   students, 
   initialTab = 'daily' 
 }) => {
-  const { jamatList, madrasahBranding, departments, branches } = useData();
+  const { jamatList, madrasahBranding, departments, classes, branches } = useData();
   const [activeTab, setActiveTab] = useState<'daily' | 'criteria' | 'monthly_report' | 'profile' | 'messaging' | 'audit_logs' | 'settings'>(initialTab);
 
   useEffect(() => {
@@ -119,6 +119,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
   const [selectedDepartment, setSelectedDepartment] = useState<string>('সব বিভাগ');
   const [selectedCategory, setSelectedCategory] = useState<string>('সব ক্যাটাগরি');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('সব স্ট্যাটাস');
+  const [selectedOriginFilter, setSelectedOriginFilter] = useState<string>('সব উৎস');
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const d = new Date();
     const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -131,6 +132,37 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [expandedJamats, setExpandedJamats] = useState<Record<string, boolean>>({});
 
+  // Helper: get resolved department for a student
+  const getStudentDepartment = useCallback((student: any): string => {
+    if (!student) return 'অন্যান্য';
+    const directDept = student['বিভাগ'] || student.department;
+    if (directDept && typeof directDept === 'string' && directDept.trim() !== '') {
+      return directDept.trim();
+    }
+    const sJamat = student['জামাত/শ্রেণী'] || student['জামাত'] || student.class || '';
+    return getDepartmentForClass(sJamat, departments, classes);
+  }, [departments, classes]);
+
+  // Helper: get standard category for a student (আবাসিক / অনাবাসিক / ডে-কেয়ার)
+  const getStudentCategory = useCallback((student: any): string => {
+    if (!student) return 'অনাবাসিক';
+    const raw = String(
+      student['ক্যাটাগরি'] ||
+      student.category ||
+      student['আবাসিক/অনাবাসিক'] ||
+      student['শাখা'] ||
+      student.branch ||
+      student['শিক্ষার্থী ধরণ/স্ট্যাটাস'] ||
+      student.studentType ||
+      ''
+    ).trim();
+
+    if (raw.includes('আবাসিক') || raw === 'ক' || raw.toLowerCase() === 'residential') return 'আবাসিক';
+    if (raw.includes('অনাবাসিক') || raw === 'খ' || raw.toLowerCase() === 'non-residential') return 'অনাবাসিক';
+    if (raw.includes('ডে') || raw === 'গ' || raw.toLowerCase() === 'daycare') return 'ডে-কেয়ার';
+    return raw || 'অনাবাসিক';
+  }, []);
+
   // Dynamic filter states pulled from Madrasah database (DataContext) and student properties
   const dynamicDepartments = useMemo(() => {
     const depts = new Set<string>();
@@ -140,34 +172,29 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
       });
     }
     students.forEach(student => {
-      const d = student['বিভাগ'] || student.department;
-      if (d && typeof d === 'string') depts.add(d.trim());
+      const dept = getStudentDepartment(student);
+      if (dept && dept !== 'অন্যান্য') depts.add(dept);
     });
     
     if (depts.size === 0) {
-      return ['হিফজুল কুরআন বিভাগ', 'কিতাব বিভাগ', 'নূরানী ও নাজেরা বিভাগ'];
+      return ['নূরানী বিভাগ', 'হিফজুল কুরআন বিভাগ', 'কিতাব বিভাগ', 'নাযেরা বিভাগ'];
     }
     return Array.from(depts);
-  }, [departments, students]);
+  }, [departments, students, getStudentDepartment]);
 
   const dynamicCategories = useMemo(() => {
-    const cats = new Set<string>();
+    const cats = new Set<string>(['আবাসিক', 'অনাবাসিক', 'ডে-কেয়ার']);
     if (Array.isArray(branches)) {
       branches.forEach(b => {
         if (b && b.name) cats.add(b.name.trim());
       });
     }
     students.forEach(student => {
-      const cat = student['ক্যাটাগরি'] || student.category || student['আবাসিক/অনাবাসিক'];
-      if (cat && typeof cat === 'string') {
-        cats.add(cat.trim());
-      }
+      const cat = getStudentCategory(student);
+      if (cat) cats.add(cat);
     });
-    if (cats.size === 0) {
-      return ['আবাসিক', 'অনাবাসিক', 'ডে-কেয়ার'];
-    }
     return Array.from(cats);
-  }, [branches, students]);
+  }, [branches, students, getStudentCategory]);
 
   // Clean formatting helper for duration: "X ঘণ্টা Y মিনিট"
   const formatDurationBn = useCallback((minutes: number): string => {
@@ -344,9 +371,12 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
   // Combined Student Table List with live record data
   const combinedList = useMemo(() => {
     return students.map(student => {
-      const sId = String(student.id || student['রেজিস্ট্রーション/আইডি নম্বর'] || student['রেজিস্ট্রেশন/আইডি'] || student['আবেদন নং'] || '').trim();
+      const sId = String(student.id || student['রেজিস্ট্রেশন/আইডি নম্বর'] || student['রেজিস্ট্রেশন/আইডি'] || student['আবেদন নং'] || '').trim();
       const rec = dayRecords[sId];
-      const sCategory = student['ক্যাটাগরি'] || student.category || student['আবাসিক/অনাবাসিক'] || 'অনাবাসিক';
+      const sCategory = getStudentCategory(student);
+      const sDept = getStudentDepartment(student);
+      const sClass = student['জামাত/শ্রেণী'] || student['জামাত'] || student.class || '';
+      const sRoll = student['রোল নম্বর'] || student['রোল'] || student.roll || '';
 
       return {
         student,
@@ -354,10 +384,10 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
           id: `att_${sId}_${selectedDate}`,
           studentId: sId,
           studentName: student['শিক্ষার্থীর নাম'] || student.name || 'শিক্ষার্থী',
-          roll: student['রোল নম্বর'] || student['রোল'] || student.roll || '',
-          class: student['জামাত/শ্রেণী'] || student['জামাত'] || student.class || '',
+          roll: sRoll,
+          class: sClass,
           branch: student['শাখা'] || student.branch || '',
-          department: student['বিভাগ'] || student.department || '',
+          department: sDept,
           category: sCategory as any,
           attendanceDate: selectedDate,
           status: 'absent' as const,
@@ -377,41 +407,65 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
         }
       };
     });
-  }, [students, dayRecords, selectedDate]);
+  }, [students, dayRecords, selectedDate, getStudentCategory, getStudentDepartment]);
 
   // Filtered List
   const filteredList = useMemo(() => {
     return combinedList.filter(({ student, record }) => {
       // 1. Jamat Filter
-      if (selectedJamat !== 'সব জামাত') {
-        const sJamat = student['জামাত/শ্রেণী'] || student['জামাত'] || student.class;
-        if (!isClassMatch(sJamat, selectedJamat)) return false;
+      if (selectedJamat !== 'সব জামাত' && selectedJamat !== 'all') {
+        const sJamat = student['জামাত/শ্রেণী'] || student['জামাত'] || student.class || '';
+        if (!isClassMatch(sJamat, selectedJamat) && sJamat !== selectedJamat) return false;
       }
 
       // 2. Department Filter
-      if (selectedDepartment !== 'সব বিভাগ') {
-        const sDept = student['বিভাগ'] || student.department;
-        if (sDept !== selectedDepartment) return false;
+      if (selectedDepartment !== 'সব বিভাগ' && selectedDepartment !== 'all') {
+        const sDept = getStudentDepartment(student);
+        const match = sDept === selectedDepartment || 
+                      sDept.includes(selectedDepartment) || 
+                      selectedDepartment.includes(sDept);
+        if (!match) return false;
       }
 
-      // 3. Category Filter (আবাসিক / অনাবাসিক)
-      if (selectedCategory !== 'সব ক্যাটাগরি') {
-        const sCat = student['ক্যাটাগরি'] || student.category || student['আবাসিক/অনাবাসিক'] || 'অনাবাসিক';
-        if (sCat !== selectedCategory) return false;
+      // 3. Category Filter (আবাসিক / অনাবাসিক / ডে-কেয়ার)
+      if (selectedCategory !== 'সব ক্যাটাগরি' && selectedCategory !== 'all') {
+        const sCat = getStudentCategory(student);
+        if (selectedCategory === 'আবাসিক' && sCat !== 'আবাসিক') return false;
+        if (selectedCategory === 'অনাবাসিক' && sCat !== 'অনাবাসিক') return false;
+        if (selectedCategory === 'ডে-কেয়ার' && sCat !== 'ডে-কেয়ার' && !sCat.includes('ডে')) return false;
+        if (selectedCategory !== 'আবাসিক' && selectedCategory !== 'অনাবাসিক' && selectedCategory !== 'ডে-কেয়ার') {
+          if (sCat !== selectedCategory && !sCat.includes(selectedCategory) && !selectedCategory.includes(sCat)) return false;
+        }
       }
 
       // 4. Status Filter
-      if (selectedStatusFilter !== 'সব স্ট্যাটাস') {
-        if (selectedStatusFilter === 'present' && record.status !== 'present') return false;
-        if (selectedStatusFilter === 'absent' && record.status !== 'absent') return false;
-        if (selectedStatusFilter === 'late' && record.status !== 'late') return false;
-        if (selectedStatusFilter === 'missing_exit' && !record.isMissingExit) return false;
-        if (selectedStatusFilter === 'temporarily_cancelled' && record.status !== 'temporarily_cancelled') return false;
+      if (selectedStatusFilter !== 'সব স্ট্যাটাস' && selectedStatusFilter !== 'all') {
+        const f = selectedStatusFilter.toLowerCase();
+        if (f === 'present' || f === 'উপস্থিত') {
+          if (record.status !== 'present' && record.status !== 'late') return false;
+        } else if (f === 'absent' || f === 'অনুপস্থিত') {
+          if (record.status !== 'absent' && record.status !== 'temporarily_cancelled') return false;
+        } else if (f === 'late' || f === 'দেরি' || f === 'দেরিতে উপস্থিত') {
+          if (record.status !== 'late' && !record.isLate && (!record.lateMinutes || record.lateMinutes <= 0)) return false;
+        } else if (f === 'missing_exit' || f === 'প্রস্থান মিসিং') {
+          const isMiss = record.isMissingExit || (record.totalEntries > record.totalExits && record.status !== 'absent');
+          if (!isMiss) return false;
+        } else if (f === 'temporarily_cancelled' || f === 'সাময়িক বাতিল') {
+          if (record.status !== 'temporarily_cancelled' && !record.isAdmissionCancelled) return false;
+        }
       }
 
-      // 5. Search Term (Name / ID / Roll / Reg)
-      if (searchTerm) {
-        const term = searchTerm.toLowerCase();
+      // 5. Origin Filter (সব উৎস / device / manual)
+      if (selectedOriginFilter !== 'সব উৎস' && selectedOriginFilter !== 'all') {
+        const isManual = record.markedBy === 'ADMIN_MANUAL' || (record.timeline && record.timeline.some(t => t.type === 'manual'));
+        const isDevice = !isManual && (record.totalPunches > 0 || (record.markedBy === 'TIPSOI_API' && (record.status === 'present' || record.status === 'late')));
+        if (selectedOriginFilter === 'device' && !isDevice) return false;
+        if (selectedOriginFilter === 'manual' && !isManual) return false;
+      }
+
+      // 6. Search Term (Name / ID / Roll / Reg)
+      if (searchTerm && searchTerm.trim()) {
+        const term = searchTerm.trim().toLowerCase();
         const sName = String(student['শিক্ষার্থীর নাম'] || student.name || '').toLowerCase();
         const sId = String(student.id || student['রেজিস্ট্রেশন/আইডি নম্বর'] || student['রেজিস্ট্রেশন/আইডি'] || '').toLowerCase();
         const sRoll = String(student['রোল নম্বর'] || student['রোল'] || student.roll || '').toLowerCase();
@@ -424,12 +478,12 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
 
       return true;
     });
-  }, [combinedList, selectedJamat, selectedDepartment, selectedCategory, selectedStatusFilter, searchTerm]);
+  }, [combinedList, selectedJamat, selectedDepartment, selectedCategory, selectedStatusFilter, selectedOriginFilter, searchTerm, getStudentDepartment, getStudentCategory]);
 
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedJamat, selectedDepartment, selectedCategory, selectedStatusFilter, searchTerm, viewMode]);
+  }, [selectedJamat, selectedDepartment, selectedCategory, selectedStatusFilter, selectedOriginFilter, searchTerm, viewMode]);
 
   const itemsPerPage = 10;
 
@@ -532,9 +586,19 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
     let totalExits = 0;
     let residentialPresent = 0;
     let nonResidentialPresent = 0;
+    let deviceVerifiedCount = 0;
+    let manualCount = 0;
 
     combinedList.forEach(({ student, record }) => {
       const isRes = (student.category || student['ক্যাটাগরি'] || student['আবাসিক/অনাবাসিক']) === 'আবাসিক';
+      const isManual = record.markedBy === 'ADMIN_MANUAL' || (record.timeline && record.timeline.some(t => t.type === 'manual'));
+      const isDevice = !isManual && (record.totalPunches > 0 || (record.markedBy === 'TIPSOI_API' && (record.status === 'present' || record.status === 'late')));
+
+      if (isManual) {
+        manualCount++;
+      } else if (isDevice) {
+        deviceVerifiedCount++;
+      }
 
       if (record.status === 'present') {
         presentCount++;
@@ -570,6 +634,8 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
       totalExits,
       residentialPresent,
       nonResidentialPresent,
+      deviceVerifiedCount,
+      manualCount,
       presentPercentage
     };
   }, [students, combinedList]);
@@ -733,9 +799,6 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                 <h1 className="text-xl md:text-2xl font-bold text-[var(--color-text-main)]">
                   রিয়েল-টাইম শিক্ষার্থী বায়োমেট্রিক হাজিরা
                 </h1>
-                <span className="px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-600 text-[10px] font-bold border border-teal-500/20 animate-pulse">
-                  লাইভ পাঞ্চ সিঙ্ক
-                </span>
               </div>
               <p className="text-xs md:text-sm text-[var(--color-text-light)]">
                 টিপসই API অটোমেটিক সিঙ্ক, ৩০ সেকেন্ড ডুপ্লিকেট ফিল্টার এবং ধারাবাহিক অনুপস্থিতি মনিটরিং
@@ -997,7 +1060,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-2.5">
               {/* Date picker */}
               <div>
                 <label className="text-[10px] font-bold text-[var(--color-text-light)] block mb-1">তারিখ নির্বাচন:</label>
@@ -1068,6 +1131,20 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                   <option value="late">দেরিতে উপস্থিত (Late)</option>
                   <option value="missing_exit">প্রস্থান মিসিং (Missing Exit)</option>
                   <option value="temporarily_cancelled">সাময়িক বাতিল (Warning)</option>
+                </select>
+              </div>
+
+              {/* Origin / Verification Filter */}
+              <div>
+                <label className="text-[10px] font-bold text-[var(--color-text-light)] block mb-1">উৎস / ভেরিফিকেশন:</label>
+                <select
+                  value={selectedOriginFilter}
+                  onChange={(e) => setSelectedOriginFilter(e.target.value)}
+                  className="w-full p-2 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-medium"
+                >
+                  <option value="সব উৎস">সকল উৎস (All)</option>
+                  <option value="device">🛡️ ডিভাইস ভেরিফাইড (Device)</option>
+                  <option value="manual">✍️ ম্যানুয়াল এন্ট্রি (Manual)</option>
                 </select>
               </div>
 
@@ -1205,9 +1282,10 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                                 <th className="p-3 text-center w-12 text-[11px]">ক্রমিক</th>
                                 <th className="p-3 text-[11px]">আইডি নম্বর</th>
                                 <th className="p-3 text-[11px]">শিক্ষার্থীর নাম</th>
-                                <th className="p-3 text-[11px]">জামাত ও রোল</th>
+                                <th className="p-3 text-center text-[11px]">রোল নম্বর</th>
                                 <th className="p-3 text-[11px]">ক্যাটাগরি</th>
                                 <th className="p-3 text-center text-[11px]">স্ট্যাটাস</th>
+                                <th className="p-3 text-center text-[11px]">উৎস ও ভেরিফিকেশন</th>
                                 <th className="p-3 text-center text-[11px]">দেরি ডিউরেশন</th>
                                 <th className="p-3 text-center text-[11px]">মোট পাঞ্চ</th>
                                 <th className="p-3 text-center text-slate-900 dark:text-slate-100 bg-emerald-50/60 dark:bg-emerald-950/20 text-[11px] font-extrabold border-x border-[var(--color-border-main)]/40">১ম প্রবেশ</th>
@@ -1223,8 +1301,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                               {items.map(({ student, record }, index) => {
                                 const sId = String(student.id || student['রেজিস্ট্রেশন/আইডি নম্বর'] || '');
                                 const sRoll = student['রোল নম্বর'] || student.roll || '—';
-                                const sClass = student['জামাত/শ্রেণী'] || student.class || '—';
-                                const sCat = student.category || student['ক্যাটাগরি'] || 'অনাবাসিক';
+                                const sCat = getStudentCategory(student);
                                 const p = getTimelinePunches(record.timeline);
 
                                 return (
@@ -1255,9 +1332,8 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                                         )}
                                       </div>
                                     </td>
-                                    <td className="p-3">
-                                      <div className="font-semibold text-[var(--color-text-main)]">{sClass}</div>
-                                      <div className="text-[10px] text-[var(--color-text-light)] font-mono">রোল: {enToBnNumber(sRoll)}</div>
+                                    <td className="p-3 text-center font-mono font-bold text-xs text-[var(--color-text-main)]">
+                                      {enToBnNumber(sRoll)}
                                     </td>
                                     <td className="p-3">
                                       <span className={cn(
@@ -1280,6 +1356,34 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                                         {record.status === 'absent' && <XCircle size={11} />}
                                         {record.status === 'present' ? 'উপস্থিত' : record.status === 'late' ? 'দেরিতে উপস্থিত' : record.status === 'temporarily_cancelled' ? 'সাময়িক বাতিল' : 'অনুপস্থিত'}
                                       </span>
+                                    </td>
+                                    <td className="p-3 text-center">
+                                      {(() => {
+                                        const isManual = record.markedBy === 'ADMIN_MANUAL' || (record.timeline && record.timeline.some(t => t.type === 'manual'));
+                                        const isDevice = !isManual && (record.totalPunches > 0 || (record.markedBy === 'TIPSOI_API' && (record.status === 'present' || record.status === 'late')));
+
+                                        if (isDevice) {
+                                          return (
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-teal-500/10 text-teal-700 dark:text-teal-300 border border-teal-500/30 whitespace-nowrap shadow-2xs">
+                                              <ShieldCheck size={11} className="text-teal-600 dark:text-teal-400" />
+                                              <span>ডিভাইস ভেরিফাইড</span>
+                                            </span>
+                                          );
+                                        }
+                                        if (isManual) {
+                                          return (
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 whitespace-nowrap shadow-2xs">
+                                              <Edit3 size={11} className="text-amber-600 dark:text-amber-400" />
+                                              <span>ম্যানুয়াল এন্ট্রি</span>
+                                            </span>
+                                          );
+                                        }
+                                        return (
+                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium text-slate-400 dark:text-slate-500 bg-slate-500/5 border border-slate-500/15 whitespace-nowrap">
+                                            <span>পাঞ্চ নেই</span>
+                                          </span>
+                                        );
+                                      })()}
                                     </td>
                                     <td className="p-3 text-center font-mono">
                                       {record.isLate ? (
@@ -1415,6 +1519,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                         <th className="p-3 text-[11px]">জামাত ও রোল</th>
                         <th className="p-3 text-[11px]">ক্যাটাগরি</th>
                         <th className="p-3 text-center text-[11px]">স্ট্যাটাস</th>
+                        <th className="p-3 text-center text-[11px]">উৎস ও ভেরিফিকেশন</th>
                         <th className="p-3 text-center text-[11px]">দেরি ডিউরেশন</th>
                         <th className="p-3 text-center text-[11px]">মোট পাঞ্চ</th>
                         <th className="p-3 text-center text-slate-900 dark:text-slate-100 bg-emerald-50/60 dark:bg-emerald-950/20 text-[11px] font-extrabold border-x border-[var(--color-border-main)]/40">১ম প্রবেশ</th>
@@ -1487,6 +1592,34 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                                 {record.status === 'absent' && <XCircle size={11} />}
                                 {record.status === 'present' ? 'উপস্থিত' : record.status === 'late' ? 'দেরিতে উপস্থিত' : record.status === 'temporarily_cancelled' ? 'সাময়িক বাতিল' : 'অনুপস্থিত'}
                               </span>
+                            </td>
+                            <td className="p-3 text-center">
+                              {(() => {
+                                const isManual = record.markedBy === 'ADMIN_MANUAL' || (record.timeline && record.timeline.some(t => t.type === 'manual'));
+                                const isDevice = !isManual && (record.totalPunches > 0 || (record.markedBy === 'TIPSOI_API' && (record.status === 'present' || record.status === 'late')));
+
+                                if (isDevice) {
+                                  return (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-teal-500/10 text-teal-700 dark:text-teal-300 border border-teal-500/30 whitespace-nowrap shadow-2xs">
+                                      <ShieldCheck size={11} className="text-teal-600 dark:text-teal-400" />
+                                      <span>ডিভাইস ভেরিফাইড</span>
+                                    </span>
+                                  );
+                                }
+                                if (isManual) {
+                                  return (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 whitespace-nowrap shadow-2xs">
+                                      <Edit3 size={11} className="text-amber-600 dark:text-amber-400" />
+                                      <span>ম্যানুয়াল এন্ট্রি</span>
+                                    </span>
+                                  );
+                                }
+                                return (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium text-slate-400 dark:text-slate-500 bg-slate-500/5 border border-slate-500/15 whitespace-nowrap">
+                                    <span>পাঞ্চ নেই</span>
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td className="p-3 text-center font-mono">
                               {record.isLate ? (
