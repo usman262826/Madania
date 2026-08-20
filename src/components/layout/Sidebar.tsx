@@ -110,54 +110,32 @@ export function Sidebar({
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>(
     {},
   );
-  const navContainerRef = useRef<HTMLDivElement | null>(null);
 
   const handleParentClick = (id: string, isCollapsedNow: boolean) => {
     if (isCollapsedNow && window.innerWidth >= 1024) {
       setSidebarMode("expanded");
-      setExpandedMenus((prev) => ({ ...prev, [id]: true }));
+      setExpandedMenus({ [id]: true });
     } else {
-      setExpandedMenus((prev) => ({
-        ...prev,
-        [id]: !prev[id],
-      }));
+      setExpandedMenus((prev) => {
+        const isOpen = !prev[id];
+        return isOpen ? { [id]: true } : {};
+      });
     }
   };
 
-  // Keep parent menu expanded when activeTab changes, without collapsing other user-opened menus
+  // Keep parent menu expanded when activeTab changes, and collapse all other menus
   React.useEffect(() => {
     const parent = menuItems.find(
       (item) =>
         "subItems" in item &&
-        item.subItems?.some((sub) => sub.id === activeTab)
+        item.subItems?.some((sub: any) => sub.id === activeTab)
     );
     if (parent) {
-      setExpandedMenus((prev) => ({
-        ...prev,
+      setExpandedMenus({
         [parent.id]: true,
-      }));
+      });
     }
   }, [activeTab]);
-
-  const activeItemRef = useRef<HTMLDivElement | null>(null);
-
-  // Scroll active item smoothly into view INSIDE the sidebar container only
-  useEffect(() => {
-    if (activeItemRef.current && navContainerRef.current) {
-      const container = navContainerRef.current;
-      const element = activeItemRef.current;
-      
-      setTimeout(() => {
-        const containerRect = container.getBoundingClientRect();
-        const elementRect = element.getBoundingClientRect();
-
-        if (elementRect.top < containerRect.top || elementRect.bottom > containerRect.bottom) {
-          const targetScroll = element.offsetTop - container.clientHeight / 2 + element.clientHeight / 2;
-          container.scrollTo({ top: Math.max(0, targetScroll), behavior: "smooth" });
-        }
-      }, 100);
-    }
-  }, [activeTab, isMobileDrawerOpen]);
 
   const menuItems = [
     { id: "dashboard", label: "ড্যাশবোর্ড", icon: LayoutDashboard },
@@ -333,81 +311,53 @@ export function Sidebar({
             <div className="w-10 h-10 rounded-[4px] bg-white/10 flex items-center justify-center shrink-0 overflow-hidden">
               <img
                 src={madrasahBranding?.logoUrl || "/src/PNG/LOGO.png"}
-                alt="Logo"
-                className="w-[36px] h-[36px] object-contain"
-                onError={(e) => {
-                  (e.target as HTMLElement).setAttribute('src', '/src/PNG/LOGO.png');
-                }}
+                alt="Madrasa Logo"
+                className="w-full h-full object-cover"
               />
             </div>
-
             {!isCollapsedNow && (
-              <div className="ml-3 flex flex-col justify-center opacity-100 transition-opacity duration-300 min-w-0">
-                <span className="font-bold text-[15px] leading-tight whitespace-nowrap text-white truncate">
-                  মাদানিয়া
-                </span>
-                <span className="text-[10px] text-white/70 tracking-wide uppercase whitespace-nowrap truncate">
-                  ম্যানেজমেন্ট সিস্টেম
-                </span>
+              <div className="ml-3">
+                <h1 className="text-sm font-black tracking-tight leading-none text-white drop-shadow-sm">
+                  {madrasahBranding?.name || "আল মাদানিয়া"}
+                </h1>
+                <p className="text-[9px] text-white/70 font-semibold tracking-wider uppercase mt-1">
+                  মাদ্রাসা ম্যানেজমেন্ট সিস্টেম
+                </p>
               </div>
             )}
           </div>
-
-          {/* Close button for Mobile Drawer */}
-          {forceExpanded && (
-            <button
-              onClick={() => setIsMobileDrawerOpen(false)}
-              className="lg:hidden flex items-center justify-center w-8 h-8 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors absolute right-2 top-4 cursor-pointer"
-            >
-              <X size={18} />
-            </button>
-          )}
         </div>
 
-        {/* Menu Area */}
-        <div ref={navContainerRef} className="flex-1 overflow-y-auto no-scrollbar pb-6 px-2.5 pt-3 space-y-0.5">
-          {menuItems.map((item) => {
-            const hasSubItems = "subItems" in item && !!item.subItems;
+        {/* Navigation Items */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden no-scrollbar py-4 px-2.5 space-y-1">
+          {menuItems.map((item, index) => {
+            const isActive = activeTab === item.id || (item.subItems && item.subItems.some((s: any) => s.id === activeTab));
+            const isParentActive = item.subItems && item.subItems.some((s: any) => s.id === activeTab);
             const isExpanded = !!expandedMenus[item.id];
-            const isParentActive =
-              hasSubItems &&
-              (item.subItems as any[]).some((sub) => sub.id === activeTab);
-            const isActive = activeTab === item.id || isParentActive;
+            const hasSubItems = item.subItems && item.subItems.length > 0;
 
             return (
-              <div 
-                key={item.id} 
-                ref={isActive ? activeItemRef : null}
-                className="relative group"
-              >
-                {/* Tooltip for collapsed mode */}
-                {isCollapsedNow && (
-                  <div className="absolute left-16 top-1/2 -translate-y-1/2 bg-gray-900 text-white text-xs px-2.5 py-1.5 rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50 pointer-events-none">
-                    {item.label}
-                    <div className="absolute left-0 top-1/2 -translate-x-1 -translate-y-1/2 border-4 border-transparent border-r-gray-900" />
-                  </div>
-                )}
-
+              <div key={item.id} className="relative">
                 <button
                   onClick={() => {
                     if (hasSubItems) {
                       handleParentClick(item.id, isCollapsedNow);
                     } else {
                       setActiveTab(item.id);
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
                       setIsMobileDrawerOpen(false);
                     }
                   }}
+                  style={index === 0 ? { paddingLeft: "12px", borderRadius: "7px" } : undefined}
                   className={cn(
                     "w-full flex items-center justify-between rounded-xl transition-all duration-300 cursor-pointer relative",
                     isCollapsedNow ? "justify-center p-2.5" : "px-3 py-2.5",
                     isActive
-                      ? "bg-gradient-to-r from-emerald-600 via-primary to-primary-light shadow-lg shadow-emerald-950/40 text-white font-black border border-emerald-400/30 ring-1 ring-emerald-400/20"
-                      : "text-white/80 hover:bg-white/10 hover:text-white",
+                      ? "bg-black/30 text-white font-black border border-white/10 shadow-inner"
+                      : "text-white/80 hover:bg-white/5 hover:text-white",
                   )}
                 >
                   {isActive && !isCollapsedNow && (
-                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1.5 h-6 bg-emerald-400 rounded-r-full shadow-md shadow-emerald-400" />
+                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1.5 h-6 bg-white/70 rounded-r-full shadow-sm" />
                   )}
 
                   <div className="flex items-center gap-3 min-w-0">
@@ -415,7 +365,7 @@ export function Sidebar({
                       size={18}
                       className={cn(
                         "shrink-0 transition-transform duration-300",
-                        isActive ? "text-emerald-300 scale-110" : "text-white/70",
+                        isActive ? "text-white scale-110" : "text-white/70",
                       )}
                     />
 
@@ -432,7 +382,7 @@ export function Sidebar({
                   {!isCollapsedNow && (
                     <div className="flex items-center gap-1.5 shrink-0">
                       {isParentActive && (
-                        <span className="px-1.5 py-0.5 text-[9px] font-black bg-emerald-400/30 text-emerald-300 border border-emerald-400/40 rounded-md">
+                        <span className="px-1.5 py-0.5 text-[9px] font-black bg-white/10 text-white/90 border border-white/20 rounded-md">
                           সক্রিয়
                         </span>
                       )}
@@ -459,7 +409,7 @@ export function Sidebar({
                       transition={{ duration: 0.25, ease: "easeInOut" }}
                       className="overflow-hidden"
                     >
-                      <div className="pl-7 pr-1 py-1 space-y-1 border-l-2 border-emerald-500/30 ml-4 my-1">
+                      <div className="pl-7 pr-1 py-1 space-y-1 border-l-2 border-white/10 ml-4 my-1">
                         {(item.subItems as any[]).map((sub) => {
                           const isSubActive = activeTab === sub.id;
                           return (
@@ -467,28 +417,27 @@ export function Sidebar({
                               key={sub.id}
                               onClick={() => {
                                 setActiveTab(sub.id);
-                                window.scrollTo({ top: 0, behavior: 'smooth' });
                                 setIsMobileDrawerOpen(false);
                               }}
                               className={cn(
                                 "w-full text-left px-3 py-2 rounded-xl text-[11px] font-medium transition-all relative flex items-center justify-between gap-2 cursor-pointer",
                                 isSubActive
-                                  ? "text-white bg-emerald-600/95 shadow-md shadow-emerald-950/50 font-black border border-emerald-400/40 ring-1 ring-emerald-400/30"
-                                  : "text-white/70 hover:text-white hover:bg-white/10",
+                                  ? "text-white bg-black/20 font-black border border-white/5 shadow-inner"
+                                  : "text-white/70 hover:text-white hover:bg-white/5",
                               )}
                             >
                               <div className="flex items-center gap-2 min-w-0">
                                 {isSubActive ? (
-                                  <CheckCircle2 size={13} className="text-emerald-300 shrink-0 animate-pulse" />
+                                  <div className="w-1.5 h-1.5 rounded-full bg-white shrink-0 animate-pulse" />
                                 ) : (
-                                  <div className="w-1.5 h-1.5 rounded-full bg-white/40 shrink-0" />
+                                  <div className="w-1 h-1 rounded-full bg-white/30 shrink-0" />
                                 )}
                                 <span className="truncate">{sub.label}</span>
                               </div>
 
                               {isSubActive && (
-                                <span className="px-1.5 py-0.5 text-[8px] font-black bg-emerald-300 text-slate-950 rounded-md shrink-0 shadow-sm">
-                                  ✓ সক্রিয়
+                                <span className="px-1.5 py-0.5 text-[8px] font-black bg-white/20 text-white rounded-md shrink-0 shadow-sm">
+                                  ✓
                                 </span>
                               )}
                             </button>
@@ -575,66 +524,6 @@ export function Sidebar({
               </button>
             )}
           </div>
-
-          {/* Desktop Mode Toggles */}
-          {!forceExpanded && (
-            <div className="border-t border-white/10 p-2 flex items-center justify-between mt-2">
-              {!isCollapsedNow ? (
-                <div className="flex w-full bg-black/20 p-1 rounded-xl">
-                  <button
-                    onClick={() => setSidebarMode("expanded")}
-                    className={cn(
-                      "flex-1 flex items-center justify-center p-1.5 rounded-lg text-[10px] font-bold transition-all",
-                      sidebarMode === "expanded"
-                        ? "bg-primary-light text-white shadow-md"
-                        : "text-white/50 hover:text-white hover:bg-white/5"
-                    )}
-                    title="Full Menu"
-                  >
-                    ফুল
-                  </button>
-                  <button
-                    onClick={() => setSidebarMode("mini")}
-                    className={cn(
-                      "flex-1 flex items-center justify-center p-1.5 rounded-lg text-[10px] font-bold transition-all",
-                      sidebarMode === "mini"
-                        ? "bg-primary-light text-white shadow-md"
-                        : "text-white/50 hover:text-white hover:bg-white/5"
-                    )}
-                    title="Only Icons"
-                  >
-                    আইকন
-                  </button>
-                  <button
-                    onClick={() => setSidebarMode("hidden")}
-                    className={cn(
-                      "flex-1 flex items-center justify-center p-1.5 rounded-lg text-[10px] font-bold transition-all text-white/50 hover:text-white hover:bg-error/20 hover:text-error"
-                    )}
-                    title="Completely Hide"
-                  >
-                    হাইড
-                  </button>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2 w-full items-center">
-                  <button
-                    onClick={() => setSidebarMode("expanded")}
-                    className="w-8 h-8 flex items-center justify-center rounded-xl bg-primary-light/20 text-primary-light hover:bg-primary-light/40 transition-colors"
-                    title="Expand Sidebar"
-                  >
-                    <ChevronRight size={16} />
-                  </button>
-                  <button
-                    onClick={() => setSidebarMode("hidden")}
-                    className="w-8 h-8 flex items-center justify-center rounded-xl text-white/40 hover:bg-error/20 hover:text-error transition-colors"
-                    title="Completely Hide"
-                  >
-                    <EyeOff size={14} />
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
     );

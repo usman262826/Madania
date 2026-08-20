@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   Users, 
   Calendar, 
@@ -23,6 +23,7 @@ import {
   Eye, 
   HelpCircle, 
   ChevronRight, 
+  ChevronDown,
   AlertCircle,
   BarChart2,
   CalendarDays,
@@ -39,7 +40,8 @@ import {
   RotateCcw,
   SlidersHorizontal,
   Home,
-  UserCheck
+  UserCheck,
+  Briefcase
 } from 'lucide-react';
 import { Student } from '../../types';
 import { 
@@ -72,9 +74,10 @@ import {
   processAttendanceEngine,
   updateStudentAttendanceManual,
   restoreCancelledStudentAdmission,
-  parsePunchTime
+  parsePunchTime,
+  notifyAttendanceUpdate
 } from '../../services/attendanceEngine';
-import { fetchTipsoiAttendanceLogs } from '../../services/tipsoiAttendanceService';
+import { fetchTipsoiAttendanceLogs, extractDateAndHHMM } from '../../services/tipsoiAttendanceService';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
@@ -100,7 +103,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
   students, 
   initialTab = 'daily' 
 }) => {
-  const { jamatList, madrasahBranding } = useData();
+  const { jamatList, madrasahBranding, departments, branches } = useData();
   const [activeTab, setActiveTab] = useState<'daily' | 'criteria' | 'monthly_report' | 'profile' | 'messaging' | 'audit_logs' | 'settings'>(initialTab);
 
   useEffect(() => {
@@ -122,6 +125,80 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
     return `${d.getFullYear()}-${mm}`;
   });
   const [searchTerm, setSearchTerm] = useState('');
+
+  // View mode and pagination states
+  const [viewMode, setViewMode] = useState<'grouped' | 'sequential'>('grouped');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [expandedJamats, setExpandedJamats] = useState<Record<string, boolean>>({});
+
+  // Dynamic filter states pulled from Madrasah database (DataContext) and student properties
+  const dynamicDepartments = useMemo(() => {
+    const depts = new Set<string>();
+    if (Array.isArray(departments)) {
+      departments.forEach(d => {
+        if (d && d.name) depts.add(d.name.trim());
+      });
+    }
+    students.forEach(student => {
+      const d = student['বিভাগ'] || student.department;
+      if (d && typeof d === 'string') depts.add(d.trim());
+    });
+    
+    if (depts.size === 0) {
+      return ['হিফজুল কুরআন বিভাগ', 'কিতাব বিভাগ', 'নূরানী ও নাজেরা বিভাগ'];
+    }
+    return Array.from(depts);
+  }, [departments, students]);
+
+  const dynamicCategories = useMemo(() => {
+    const cats = new Set<string>();
+    if (Array.isArray(branches)) {
+      branches.forEach(b => {
+        if (b && b.name) cats.add(b.name.trim());
+      });
+    }
+    students.forEach(student => {
+      const cat = student['ক্যাটাগরি'] || student.category || student['আবাসিক/অনাবাসিক'];
+      if (cat && typeof cat === 'string') {
+        cats.add(cat.trim());
+      }
+    });
+    if (cats.size === 0) {
+      return ['আবাসিক', 'অনাবাসিক', 'ডে-কেয়ার'];
+    }
+    return Array.from(cats);
+  }, [branches, students]);
+
+  // Clean formatting helper for duration: "X ঘণ্টা Y মিনিট"
+  const formatDurationBn = useCallback((minutes: number): string => {
+    if (!minutes || minutes <= 0) return '০ মি.';
+    const hours = Math.floor(minutes / 60);
+    const remainingMins = minutes % 60;
+    
+    let result = '';
+    if (hours > 0) {
+      result += `${enToBnNumber(hours)} ঘণ্টা `;
+    }
+    if (remainingMins > 0) {
+      result += `${enToBnNumber(remainingMins)} মিনিট`;
+    }
+    return result.trim();
+  }, []);
+
+  // Multi-punch parser for entry/exit columns (Up to 3 pairs)
+  const getTimelinePunches = useCallback((timeline: any[] | undefined) => {
+    const t = timeline || [];
+    const entries = t.filter((item: any) => item.type === 'entry').map((item: any) => item.time);
+    const exits = t.filter((item: any) => item.type === 'exit').map((item: any) => item.time);
+    return {
+      entry1: entries[0] ? enToBnNumber(entries[0]) : '—',
+      exit1: exits[0] ? enToBnNumber(exits[0]) : '—',
+      entry2: entries[1] ? enToBnNumber(entries[1]) : '—',
+      exit2: exits[1] ? enToBnNumber(exits[1]) : '—',
+      entry3: entries[2] ? enToBnNumber(entries[2]) : '—',
+      exit3: exits[2] ? enToBnNumber(exits[2]) : '—',
+    };
+  }, []);
 
   // Real-time Database state
   const [dailyDb, setDailyDb] = useState<Record<string, Record<string, StudentAttendanceRecord>>>(() => getDailyAttendanceDb());
@@ -174,11 +251,89 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
     return () => unsubscribe();
   }, []);
 
-  // Ensure today's attendance is synthesized if not present
+  // Real-time API auto-fetch from Tipsoi machine whenever date changes or component loads
   useEffect(() => {
-    const raw = getRawPunches();
-    processAttendanceEngine(raw, students, selectedDate, settings);
-    setDailyDb(getDailyAttendanceDb());
+    let isMounted = true;
+
+    const syncTipsoiLiveData = async () => {
+      try {
+        const { punches } = await fetchTipsoiAttendanceLogs(selectedDate);
+        if (!isMounted) return;
+
+        // Cleanly retain punches for OTHER dates, and build fresh selectedDate punches from real API response
+        const allRaw = getRawPunches();
+        const otherDatePunches = allRaw.filter(p => {
+          const rawTime = p.punchTime || p.loggedTime || p.syncTime || '';
+          const parsed = extractDateAndHHMM(rawTime, selectedDate);
+          return parsed.dateYYYYMMDD !== selectedDate;
+        });
+
+        const newSelectedDatePunches: RawPunchRecord[] = [];
+        const existingKeys = new Set<string>();
+
+        punches.forEach(p => {
+          const rawTime = p.logged_time || p.punch_time || p.time || p.sync_time || '';
+          const parsed = extractDateAndHHMM(rawTime, selectedDate);
+          if (parsed.dateYYYYMMDD !== selectedDate) return;
+
+          const normalizedTime = `${parsed.dateYYYYMMDD} ${parsed.timeHHMM}:00`;
+          const userId = String(p.person_identifier || p.identifier || p.emp_id || p.user_id || p.card_no || '').trim();
+          if (!userId) return;
+
+          const key = `${userId}_${normalizedTime}`;
+          if (!existingKeys.has(key)) {
+            existingKeys.add(key);
+            newSelectedDatePunches.push({
+              id: `raw_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+              deviceId: String(p.device_identifier || 'TIPSOI-01'),
+              deviceName: p.device_name || 'টিপসই স্মার্ট ডিভাইস',
+              userId,
+              userType: 'student',
+              punchTime: normalizedTime,
+              loggedTime: p.logged_time,
+              syncTime: p.sync_time,
+              receivedTime: new Date().toISOString(),
+              punchType: p.punch_type || 'fingerprint',
+              rawApiData: p.raw || p,
+              processingStatus: 'processed',
+            });
+          }
+        });
+
+        const updatedRaw = [...otherDatePunches, ...newSelectedDatePunches];
+        saveRawPunches(updatedRaw);
+
+        processAttendanceEngine(updatedRaw, students, selectedDate, settings);
+        setDailyDb(getDailyAttendanceDb());
+
+        updateSyncStatusInfo({
+          connected: true,
+          lastSyncTime: new Date().toISOString(),
+          lastReceivedPunchTime: punches[punches.length - 1]?.punch_time || new Date().toISOString(),
+          totalPunchesToday: punches.length,
+          lastError: null,
+        });
+      } catch (err: any) {
+        // Fallback to local raw punches if offline
+        const raw = getRawPunches();
+        processAttendanceEngine(raw, students, selectedDate, settings);
+        setDailyDb(getDailyAttendanceDb());
+      }
+    };
+
+    syncTipsoiLiveData();
+
+    // Auto-poll live punches every 30 seconds if viewing today's attendance
+    const todayStr = new Date().toISOString().split('T')[0];
+    let intervalId: any = null;
+    if (selectedDate === todayStr) {
+      intervalId = setInterval(syncTipsoiLiveData, 30000);
+    }
+
+    return () => {
+      isMounted = false;
+      if (intervalId) clearInterval(intervalId);
+    };
   }, [selectedDate, students]);
 
   // Current selected day records
@@ -271,6 +426,100 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
     });
   }, [combinedList, selectedJamat, selectedDepartment, selectedCategory, selectedStatusFilter, searchTerm]);
 
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedJamat, selectedDepartment, selectedCategory, selectedStatusFilter, searchTerm, viewMode]);
+
+  const itemsPerPage = 10;
+
+  // Partitioned Group Pages: An array where each item is a Record<jamatName, items[]>
+  const partitionedGroupPages = useMemo(() => {
+    if (viewMode !== 'grouped') return [];
+
+    // First, group the entire filtered list of students by Jamat
+    const fullGroups: Record<string, typeof filteredList> = {};
+    filteredList.forEach(item => {
+      const jamat = item.student['জামাত/শ্রেণী'] || item.student['জামাত'] || item.student.class || 'অন্যান্য';
+      if (!fullGroups[jamat]) {
+        fullGroups[jamat] = [];
+      }
+      fullGroups[jamat].push(item);
+    });
+
+    const jamatGroups = Object.entries(fullGroups).map(([jamatName, items]) => ({
+      jamatName,
+      items
+    }));
+
+    const pages: Record<string, typeof filteredList>[] = [];
+    let currentPageMap: Record<string, typeof filteredList> = {};
+    let currentCount = 0;
+
+    jamatGroups.forEach(group => {
+      const groupSize = group.items.length;
+      const groupCount = Object.keys(currentPageMap).length;
+
+      if (groupCount === 0) {
+        currentPageMap[group.jamatName] = group.items;
+        currentCount = groupSize;
+      } else {
+        // If adding this group makes the page too crowded, start a new page.
+        // User's specific rule: If total count in displayed jamat is small (e.g. < 10), we can show multiple jamats (e.g. 2 jamats).
+        // If a jamat has 10 or more, it will be shown by itself as a single complete jamat on the page.
+        // And we must never split a jamat!
+        if (currentCount >= 10 || (currentCount + groupSize > 12 && groupSize >= 5)) {
+          pages.push(currentPageMap);
+          currentPageMap = { [group.jamatName]: group.items };
+          currentCount = groupSize;
+        } else {
+          currentPageMap[group.jamatName] = group.items;
+          currentCount += groupSize;
+        }
+      }
+    });
+
+    if (Object.keys(currentPageMap).length > 0) {
+      pages.push(currentPageMap);
+    }
+
+    return pages;
+  }, [filteredList, viewMode]);
+
+  const totalPages = useMemo(() => {
+    if (viewMode === 'grouped') {
+      return Math.max(1, partitionedGroupPages.length);
+    } else {
+      return Math.max(1, Math.ceil(filteredList.length / itemsPerPage));
+    }
+  }, [filteredList, viewMode, partitionedGroupPages]);
+
+  const paginatedList = useMemo(() => {
+    if (viewMode === 'grouped') {
+      const currentPageGroups = partitionedGroupPages[currentPage - 1] || {};
+      return Object.values(currentPageGroups).flat();
+    } else {
+      const startIdx = (currentPage - 1) * itemsPerPage;
+      return filteredList.slice(startIdx, startIdx + itemsPerPage);
+    }
+  }, [filteredList, currentPage, viewMode, partitionedGroupPages]);
+
+  const paginatedGroupedList = useMemo(() => {
+    if (viewMode === 'grouped') {
+      return partitionedGroupPages[currentPage - 1] || {};
+    } else {
+      const groups: Record<string, typeof paginatedList> = {};
+      paginatedList.forEach(item => {
+        const jamat = item.student['জামাত/শ্রেণী'] || item.student['জামাত'] || item.student.class || 'অন্যান্য';
+        if (!groups[jamat]) {
+          groups[jamat] = [];
+        }
+        groups[jamat].push(item);
+      });
+      return groups;
+    }
+  }, [paginatedList, viewMode, partitionedGroupPages, currentPage]);
+
   // Statistics Summary for selected day
   const stats = useMemo(() => {
     const totalStudents = students.length;
@@ -336,9 +585,11 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
 
       let newCount = 0;
       punches.forEach(p => {
-        const punchTime = p.logged_time || p.punch_time || p.time || p.sync_time || '';
+        const rawTime = p.logged_time || p.punch_time || p.time || p.sync_time || '';
+        const parsed = extractDateAndHHMM(rawTime, selectedDate);
+        const normalizedTime = `${parsed.dateYYYYMMDD} ${parsed.timeHHMM}:00`;
         const userId = String(p.person_identifier || p.identifier || p.emp_id || p.user_id || p.card_no || '').trim();
-        const key = `${userId}_${punchTime}`;
+        const key = `${userId}_${normalizedTime}`;
 
         if (!existingKeys.has(key)) {
           existingKeys.add(key);
@@ -348,7 +599,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
             deviceName: p.device_name || 'টিপসই স্মার্ট ডিভাইস',
             userId,
             userType: 'student',
-            punchTime: punchTime || `${selectedDate} 08:00:00`,
+            punchTime: normalizedTime,
             loggedTime: p.logged_time,
             syncTime: p.sync_time,
             receivedTime: new Date().toISOString(),
@@ -360,8 +611,10 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
         }
       });
 
+      saveRawPunches(raw);
       processAttendanceEngine(raw, students, selectedDate, settings);
       setDailyDb(getDailyAttendanceDb());
+      notifyAttendanceUpdate();
 
       updateSyncStatusInfo({
         connected: true,
@@ -500,7 +753,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                 : "bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400"
             )}>
               <div className={cn("w-2.5 h-2.5 rounded-full", syncInfo.connected ? "bg-emerald-500 animate-ping" : "bg-rose-500")} />
-              <span>{syncInfo.connected ? "ডিভাইস কানেক্টেড (Live)" : "ডিভাইস সংযোগ বিচ্ছিন্ন"}</span>
+              <span style={{ borderColor: '#005047', color: '#00603d' }}>{syncInfo.connected ? "ডিভাইস কানেক্টেড (Live)" : "ডিভাইস সংযোগ বিচ্ছিন্ন"}</span>
             </div>
 
             {/* Test Punch Simulation Button */}
@@ -509,7 +762,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
               className="px-3.5 py-2 rounded-xl bg-teal-500/10 hover:bg-teal-500/20 text-teal-700 dark:text-teal-300 text-xs font-bold flex items-center gap-1.5 border border-teal-500/30 transition-all"
             >
               <Zap size={14} className="text-amber-500" />
-              <span>টেস্ট পাঞ্চ সিমুলেশন</span>
+              <span style={{ color: '#0a7969' }}>টেস্ট পাঞ্চ সিমুলেশন</span>
             </button>
 
             {/* Manual Sync Pull Button */}
@@ -780,9 +1033,9 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                   className="w-full p-2 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-medium"
                 >
                   <option value="সব বিভাগ">সব বিভাগ</option>
-                  <option value="হিফজুল কুরআন বিভাগ">হিফজুল কুরআন বিভাগ</option>
-                  <option value="কিতাব বিভাগ">কিতাব বিভাগ</option>
-                  <option value="নূরানী ও নাজেরা বিভাগ">নূরানী ও নাজেরা বিভাগ</option>
+                  {dynamicDepartments.map(dept => (
+                    <option key={dept} value={dept}>{dept}</option>
+                  ))}
                 </select>
               </div>
 
@@ -795,9 +1048,9 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                   className="w-full p-2 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-medium"
                 >
                   <option value="সব ক্যাটাগরি">সব ক্যাটাগরি</option>
-                  <option value="আবাসিক">আবাসিক</option>
-                  <option value="অনাবাসিক">অনাবাসিক</option>
-                  <option value="ডে-কেয়ার">ডে-কেয়ার</option>
+                  {dynamicCategories.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
                 </select>
               </div>
 
@@ -835,212 +1088,603 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
             </div>
           </div>
 
-          {/* SECTION 3: REAL-TIME ATTENDANCE TABLE */}
-          <div className="bg-[var(--color-card)] rounded-2xl border border-[var(--color-border-main)] shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-[var(--color-border-main)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+          {/* SECTION 3: REAL-TIME ATTENDANCE VIEWS AND PAGINATION */}
+          <div className="space-y-4">
+            {/* View Mode Controls and Actions */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-[var(--color-bg)] p-4 rounded-2xl border border-[var(--color-border-main)]">
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="font-bold text-xs md:text-sm text-[var(--color-text-main)]">
-                  {selectedDate === todayStr ? "আজকের লাইভ পাঞ্চ ডাটা" : `${selectedDate} তারিখের ডাটা`} — মোট {enToBnNumber(filteredList.length)} জন শিক্ষার্থী প্রদর্শিত
-                </span>
+                <span className="text-xs font-bold text-[var(--color-text-main)]">ভিউ মোড:</span>
+                <div className="inline-flex rounded-xl p-1 bg-[var(--color-card)] border border-[var(--color-border-main)] shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setViewMode('grouped');
+                      setCurrentPage(1);
+                    }}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1.5",
+                      viewMode === 'grouped'
+                        ? "bg-teal-600 text-white shadow-sm"
+                        : "text-[var(--color-text-main)] hover:bg-[var(--color-bg)]"
+                    )}
+                  >
+                    <span>জামাত ভিত্তিক গ্রুপ ভিউ (সেক্রেটারিয়েট)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setViewMode('sequential');
+                      setCurrentPage(1);
+                    }}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1.5",
+                      viewMode === 'sequential'
+                        ? "bg-teal-600 text-white shadow-sm"
+                        : "text-[var(--color-text-main)] hover:bg-[var(--color-bg)]"
+                    )}
+                  >
+                    <span>ক্রমিক ভিত্তিক তালিকা ভিউ</span>
+                  </button>
+                </div>
               </div>
 
-              <div className="text-[11px] text-[var(--color-text-light)] font-medium">
-                সর্বশেষ পাঞ্চ আপডেট: {syncInfo.lastReceivedPunchTime ? syncInfo.lastReceivedPunchTime.slice(11, 19) : 'রিয়েল-টাইম সক্রিয়'}
-              </div>
+              {viewMode === 'grouped' && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const allJamats: Record<string, boolean> = {};
+                      Object.keys(paginatedGroupedList).forEach(j => {
+                        allJamats[j] = true;
+                      });
+                      setExpandedJamats(allJamats);
+                      toast.success('সব জামাত খোলা হয়েছে!');
+                    }}
+                    className="px-3 py-1.5 rounded-xl border border-[var(--color-border-main)] bg-[var(--color-card)] text-[10px] font-bold text-[var(--color-text-main)] hover:bg-[var(--color-bg)] transition-all shadow-2xs"
+                  >
+                    সবগুলো জামাত খুলুন
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const allJamats: Record<string, boolean> = {};
+                      Object.keys(paginatedGroupedList).forEach(j => {
+                        allJamats[j] = false;
+                      });
+                      setExpandedJamats(allJamats);
+                      toast.success('সব জামাত বন্ধ করা হয়েছে!');
+                    }}
+                    className="px-3 py-1.5 rounded-xl border border-[var(--color-border-main)] bg-[var(--color-card)] text-[10px] font-bold text-[var(--color-text-main)] hover:bg-[var(--color-bg)] transition-all shadow-2xs"
+                  >
+                    সবগুলো জামাত বন্ধ করুন
+                  </button>
+                </div>
+              )}
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-[var(--color-bg)] border-b border-[var(--color-border-main)] font-bold text-[var(--color-text-main)]">
-                    <th className="p-3 text-center w-12">ক্রমিক</th>
-                    <th className="p-3">শিক্ষার্থীর নাম ও আইডি</th>
-                    <th className="p-3">জামাত ও রোল</th>
-                    <th className="p-3">ক্যাটাগরি</th>
-                    <th className="p-3">প্রথম প্রবেশ (Entry)</th>
-                    <th className="p-3">সর্বশেষ পাঞ্চ</th>
-                    <th className="p-3">প্রস্থান (Exit)</th>
-                    <th className="p-3 text-center">স্ট্যাটাস</th>
-                    <th className="p-3 text-center">দেরি (মিনিট)</th>
-                    <th className="p-3 text-center">মোট পাঞ্চ</th>
-                    <th className="p-3 text-right">একশন</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--color-border-main)]">
-                  {filteredList.length === 0 ? (
-                    <tr>
-                      <td colSpan={11} className="p-10 text-center text-xs text-[var(--color-text-light)]">
-                        কোন শিক্ষার্থী পাওয়া যায়নি। ফিল্টার পরিবর্তন করে পুনরায় চেষ্টা করুন।
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredList.map(({ student, record }, index) => {
-                      const sId = String(student.id || student['রেজিস্ট্রেশন/আইডি নম্বর'] || '');
-                      const sRoll = student['রোল নম্বর'] || student.roll || '—';
-                      const sClass = student['জামাত/শ্রেণী'] || student.class || '—';
-                      const sCat = student.category || student['ক্যাটাগরি'] || 'অনাবাসিক';
+            {/* Attendance Tables Block */}
+            {filteredList.length === 0 ? (
+              <div className="bg-[var(--color-card)] rounded-2xl border border-[var(--color-border-main)] p-12 text-center text-xs text-[var(--color-text-light)]">
+                কোন শিক্ষার্থী পাওয়া যায়নি। ফিল্টার পরিবর্তন করে পুনরায় চেষ্টা করুন।
+              </div>
+            ) : viewMode === 'grouped' ? (
+              /* GROUPED JAMAT-BASED ACCORDIONS */
+              <div className="space-y-4">
+                {Object.entries(paginatedGroupedList).map(([jamatName, itemsList]) => {
+                  const items = itemsList as typeof paginatedList;
+                  const isCollapsed = expandedJamats[jamatName] === false;
+                  return (
+                    <div 
+                      key={jamatName} 
+                      className="bg-[var(--color-card)] rounded-2xl border border-[var(--color-border-main)] overflow-hidden shadow-2xs transition-all"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExpandedJamats(prev => ({
+                            ...prev,
+                            [jamatName]: isCollapsed
+                          }));
+                        }}
+                        className="w-full p-4 bg-[var(--color-bg)] border-b border-[var(--color-border-main)] flex items-center justify-between text-left hover:bg-[var(--color-bg)]/80 transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          {isCollapsed ? <ChevronRight size={16} className="text-gray-500" /> : <ChevronDown size={16} className="text-teal-600" />}
+                          <span className="font-bold text-xs md:text-sm text-[var(--color-text-main)]">{jamatName}</span>
+                          <span className="px-2.5 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-slate-100 text-[10px] font-extrabold border border-slate-300 dark:border-slate-600">
+                            {enToBnNumber(items.length)} জন
+                          </span>
+                        </div>
+                      </button>
 
-                      return (
-                        <tr 
-                          key={sId || index} 
-                          className={cn(
-                            "hover:bg-[var(--color-bg)]/60 transition-colors",
-                            record.isAdmissionCancelled && "bg-rose-500/5",
-                            record.isLate && "bg-amber-500/5"
-                          )}
-                        >
-                          {/* Index */}
-                          <td className="p-3 text-center font-mono text-[11px] text-[var(--color-text-light)]">
-                            {enToBnNumber(index + 1)}
-                          </td>
+                      {!isCollapsed && (
+                        <div className="overflow-x-auto select-none md:select-auto max-w-full block">
+                          <table className="w-full text-left text-xs border-collapse min-w-[1250px]">
+                            <thead>
+                              <tr className="bg-[var(--color-bg)] border-b border-[var(--color-border-main)] font-bold text-[var(--color-text-main)]">
+                                <th className="p-3 text-center w-12 text-[11px]">ক্রমিক</th>
+                                <th className="p-3 text-[11px]">আইডি নম্বর</th>
+                                <th className="p-3 text-[11px]">শিক্ষার্থীর নাম</th>
+                                <th className="p-3 text-[11px]">জামাত ও রোল</th>
+                                <th className="p-3 text-[11px]">ক্যাটাগরি</th>
+                                <th className="p-3 text-center text-[11px]">স্ট্যাটাস</th>
+                                <th className="p-3 text-center text-[11px]">দেরি ডিউরেশন</th>
+                                <th className="p-3 text-center text-[11px]">মোট পাঞ্চ</th>
+                                <th className="p-3 text-center text-slate-900 dark:text-slate-100 bg-emerald-50/60 dark:bg-emerald-950/20 text-[11px] font-extrabold border-x border-[var(--color-border-main)]/40">১ম প্রবেশ</th>
+                                <th className="p-3 text-center text-slate-900 dark:text-slate-100 bg-indigo-50/60 dark:bg-indigo-950/20 text-[11px] font-extrabold border-r border-[var(--color-border-main)]/40">১ম বাহির</th>
+                                <th className="p-3 text-center text-slate-900 dark:text-slate-100 bg-emerald-50/60 dark:bg-emerald-950/20 text-[11px] font-extrabold border-r border-[var(--color-border-main)]/40">২য় প্রবেশ</th>
+                                <th className="p-3 text-center text-slate-900 dark:text-slate-100 bg-indigo-50/60 dark:bg-indigo-950/20 text-[11px] font-extrabold border-r border-[var(--color-border-main)]/40">২য় বাহির</th>
+                                <th className="p-3 text-center text-slate-900 dark:text-slate-100 bg-emerald-50/60 dark:bg-emerald-950/20 text-[11px] font-extrabold border-r border-[var(--color-border-main)]/40">৩য় প্রবেশ</th>
+                                <th className="p-3 text-center text-slate-900 dark:text-slate-100 bg-indigo-50/60 dark:bg-indigo-950/20 text-[11px] font-extrabold border-r border-[var(--color-border-main)]/40">৩য় বাহির</th>
+                                <th className="p-3 text-right text-[11px]">একশন</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[var(--color-border-main)]">
+                              {items.map(({ student, record }, index) => {
+                                const sId = String(student.id || student['রেজিস্ট্রেশন/আইডি নম্বর'] || '');
+                                const sRoll = student['রোল নম্বর'] || student.roll || '—';
+                                const sClass = student['জামাত/শ্রেণী'] || student.class || '—';
+                                const sCat = student.category || student['ক্যাটাগরি'] || 'অনাবাসিক';
+                                const p = getTimelinePunches(record.timeline);
 
-                          {/* Name & ID */}
-                          <td className="p-3">
-                            <div 
-                              onClick={() => setSelectedStudentForReport(student)}
-                              className="font-bold text-[var(--color-text-main)] hover:text-teal-600 cursor-pointer flex items-center gap-1.5"
-                            >
-                              <span>{student['শিক্ষার্থীর নাম'] || student.name}</span>
-                              {record.isAdmissionCancelled && (
-                                <span className="px-1.5 py-0.2 rounded bg-rose-600 text-white text-[9px] font-bold">
-                                  সাময়িক বাতিল
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-[10px] text-[var(--color-text-light)] font-mono">
-                              আইডি: {sId}
-                            </div>
-                          </td>
+                                return (
+                                  <tr 
+                                    key={sId || index} 
+                                    className={cn(
+                                      "hover:bg-[var(--color-bg)]/60 transition-colors",
+                                      record.isAdmissionCancelled && "bg-rose-500/5",
+                                      record.isLate && "bg-amber-500/5"
+                                    )}
+                                  >
+                                    <td className="p-3 text-center font-mono text-[11px] text-[var(--color-text-light)]">
+                                      {enToBnNumber(index + 1)}
+                                    </td>
+                                    <td className="p-3 font-mono text-[11px] font-extrabold text-slate-900 dark:text-slate-100 bg-slate-50/50 dark:bg-slate-900/30 border-x border-[var(--color-border-main)]/20">
+                                      {sId}
+                                    </td>
+                                    <td className="p-3">
+                                      <div 
+                                        onClick={() => setSelectedStudentForReport(student)}
+                                        className="font-bold text-[var(--color-text-main)] hover:text-teal-600 cursor-pointer flex items-center gap-1.5"
+                                      >
+                                        <span>{student['শিক্ষার্থীর নাম'] || student.name}</span>
+                                        {record.isAdmissionCancelled && (
+                                          <span className="px-1.5 py-0.2 rounded bg-rose-600 text-white text-[9px] font-bold whitespace-nowrap">
+                                            সাময়িক বাতিল
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td className="p-3">
+                                      <div className="font-semibold text-[var(--color-text-main)]">{sClass}</div>
+                                      <div className="text-[10px] text-[var(--color-text-light)] font-mono">রোল: {enToBnNumber(sRoll)}</div>
+                                    </td>
+                                    <td className="p-3">
+                                      <span className={cn(
+                                        "px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap",
+                                        sCat === 'আবাসিক' ? "bg-purple-500/10 text-purple-600" : "bg-blue-500/10 text-blue-600"
+                                      )}>
+                                        {sCat}
+                                      </span>
+                                    </td>
+                                    <td className="p-3 text-center">
+                                      <span className={cn(
+                                        "px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap",
+                                        record.status === 'present' && "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20",
+                                        record.status === 'late' && "bg-amber-500/10 text-amber-600 border border-amber-500/20",
+                                        record.status === 'absent' && "bg-rose-500/10 text-rose-600 border border-rose-500/20",
+                                        record.status === 'temporarily_cancelled' && "bg-red-600 text-white font-bold"
+                                      )}>
+                                        {record.status === 'present' && <CheckCircle2 size={11} />}
+                                        {record.status === 'late' && <Clock size={11} />}
+                                        {record.status === 'absent' && <XCircle size={11} />}
+                                        {record.status === 'present' ? 'উপস্থিত' : record.status === 'late' ? 'দেরিতে উপস্থিত' : record.status === 'temporarily_cancelled' ? 'সাময়িক বাতিল' : 'অনুপস্থিত'}
+                                      </span>
+                                    </td>
+                                    <td className="p-3 text-center font-mono">
+                                      {record.isLate ? (
+                                        <span className="text-amber-600 font-bold whitespace-nowrap">
+                                          {formatDurationBn(record.lateMinutes)}
+                                        </span>
+                                      ) : (
+                                        <span className="text-gray-400">০ মি.</span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 text-center font-mono font-bold">
+                                      <span className="px-2 py-0.5 rounded bg-[var(--color-bg)] border border-[var(--color-border-main)] whitespace-nowrap">
+                                        {enToBnNumber(record.totalPunches || 0)}
+                                      </span>
+                                    </td>
+                                    <td className="p-3 font-mono text-center font-bold text-teal-600 dark:text-teal-400">
+                                      {p.entry1 !== '—' ? (
+                                        <span className="inline-flex items-center gap-1 rounded bg-teal-500/10 px-1.5 py-0.5 whitespace-nowrap">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
+                                          {p.entry1}
+                                        </span>
+                                      ) : (
+                                        <span className="text-gray-400 font-normal">—</span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 font-mono text-center font-bold text-indigo-600 dark:text-indigo-400">
+                                      {p.exit1 !== '—' ? (
+                                        <span className="inline-flex items-center gap-1 rounded bg-indigo-500/10 px-1.5 py-0.5 whitespace-nowrap">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                                          {p.exit1}
+                                        </span>
+                                      ) : (
+                                        <span className="text-gray-400 font-normal">—</span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 font-mono text-center font-bold text-teal-600 dark:text-teal-400">
+                                      {p.entry2 !== '—' ? (
+                                        <span className="inline-flex items-center gap-1 rounded bg-teal-500/10 px-1.5 py-0.5 whitespace-nowrap">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
+                                          {p.entry2}
+                                        </span>
+                                      ) : (
+                                        <span className="text-gray-400 font-normal">—</span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 font-mono text-center font-bold text-indigo-600 dark:text-indigo-400">
+                                      {p.exit2 !== '—' ? (
+                                        <span className="inline-flex items-center gap-1 rounded bg-indigo-500/10 px-1.5 py-0.5 whitespace-nowrap">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                                          {p.exit2}
+                                        </span>
+                                      ) : (
+                                        <span className="text-gray-400 font-normal">—</span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 font-mono text-center font-bold text-teal-600 dark:text-teal-400">
+                                      {p.entry3 !== '—' ? (
+                                        <span className="inline-flex items-center gap-1 rounded bg-teal-500/10 px-1.5 py-0.5 whitespace-nowrap">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
+                                          {p.entry3}
+                                        </span>
+                                      ) : (
+                                        <span className="text-gray-400 font-normal">—</span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 font-mono text-center font-bold text-indigo-600 dark:text-indigo-400">
+                                      {p.exit3 !== '—' ? (
+                                        <span className="inline-flex items-center gap-1 rounded bg-indigo-500/10 px-1.5 py-0.5 whitespace-nowrap">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                                          {p.exit3}
+                                        </span>
+                                      ) : (
+                                        <span className="text-gray-400 font-normal">—</span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 text-right">
+                                      <div className="flex items-center justify-end gap-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => setSelectedStudentForReport(student)}
+                                          className="px-2 py-1 rounded-lg bg-teal-500/10 hover:bg-teal-600 hover:text-white text-teal-700 dark:text-teal-300 font-bold text-[10px] flex items-center gap-1 transition-all border border-teal-500/20 shadow-2xs cursor-pointer"
+                                        >
+                                          <Eye size={12} />
+                                          <span>ভিউ</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setManualEditStudent(student);
+                                            setManualStatus(record.status);
+                                            setManualReason('');
+                                          }}
+                                          className="p-1.5 rounded-lg bg-[var(--color-bg)] hover:bg-amber-500/10 hover:text-amber-600 text-[var(--color-text-light)] transition-all border border-[var(--color-border-main)]"
+                                        >
+                                          <Edit3 size={12} />
+                                        </button>
+                                        {record.isAdmissionCancelled && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              restoreCancelledStudentAdmission(sId, 'এডমিন', 'মঞ্জুরীকৃত পুনর্বহাল', students);
+                                              setDailyDb(getDailyAttendanceDb());
+                                              toast.success('শিক্ষার্থীর ভর্তি সফলভাবে পুনর্বহাল করা হয়েছে!');
+                                            }}
+                                            className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-bold shadow-2xs whitespace-nowrap"
+                                          >
+                                            পুনর্বহাল
+                                          </button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              /* FLAT SEQUENTIAL LIST VIEW */
+              <div className="bg-[var(--color-card)] rounded-2xl border border-[var(--color-border-main)] shadow-sm overflow-hidden">
+                <div className="overflow-x-auto select-none md:select-auto max-w-full block">
+                  <table className="w-full text-left text-xs border-collapse min-w-[1250px]">
+                    <thead>
+                      <tr className="bg-[var(--color-bg)] border-b border-[var(--color-border-main)] font-bold text-[var(--color-text-main)]">
+                        <th className="p-3 text-center w-12 text-[11px]">ক্রমিক</th>
+                        <th className="p-3 text-[11px]">আইডি নম্বর</th>
+                        <th className="p-3 text-[11px]">শিক্ষার্থীর নাম</th>
+                        <th className="p-3 text-[11px]">জামাত ও রোল</th>
+                        <th className="p-3 text-[11px]">ক্যাটাগরি</th>
+                        <th className="p-3 text-center text-[11px]">স্ট্যাটাস</th>
+                        <th className="p-3 text-center text-[11px]">দেরি ডিউরেশন</th>
+                        <th className="p-3 text-center text-[11px]">মোট পাঞ্চ</th>
+                        <th className="p-3 text-center text-slate-900 dark:text-slate-100 bg-emerald-50/60 dark:bg-emerald-950/20 text-[11px] font-extrabold border-x border-[var(--color-border-main)]/40">১ম প্রবেশ</th>
+                        <th className="p-3 text-center text-slate-900 dark:text-slate-100 bg-indigo-50/60 dark:bg-indigo-950/20 text-[11px] font-extrabold border-r border-[var(--color-border-main)]/40">১ম বাহির</th>
+                        <th className="p-3 text-center text-slate-900 dark:text-slate-100 bg-emerald-50/60 dark:bg-emerald-950/20 text-[11px] font-extrabold border-r border-[var(--color-border-main)]/40">২য় প্রবেশ</th>
+                        <th className="p-3 text-center text-slate-900 dark:text-slate-100 bg-indigo-50/60 dark:bg-indigo-950/20 text-[11px] font-extrabold border-r border-[var(--color-border-main)]/40">২য় বাহির</th>
+                        <th className="p-3 text-center text-slate-900 dark:text-slate-100 bg-emerald-50/60 dark:bg-emerald-950/20 text-[11px] font-extrabold border-r border-[var(--color-border-main)]/40">৩য় প্রবেশ</th>
+                        <th className="p-3 text-center text-slate-900 dark:text-slate-100 bg-indigo-50/60 dark:bg-indigo-950/20 text-[11px] font-extrabold border-r border-[var(--color-border-main)]/40">৩য় বাহির</th>
+                        <th className="p-3 text-right text-[11px]">একশন</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--color-border-main)]">
+                      {paginatedList.map(({ student, record }, index) => {
+                        const sId = String(student.id || student['রেজিস্ট্রেশন/আইডি নম্বর'] || '');
+                        const sRoll = student['রোল নম্বর'] || student.roll || '—';
+                        const sClass = student['জামাত/শ্রেণী'] || student.class || '—';
+                        const sCat = student.category || student['ক্যাটাগরি'] || 'অনাবাসিক';
+                        const p = getTimelinePunches(record.timeline);
 
-                          {/* Jamat & Roll */}
-                          <td className="p-3">
-                            <div className="font-semibold text-[var(--color-text-main)]">{sClass}</div>
-                            <div className="text-[10px] text-[var(--color-text-light)] font-mono">রোল: {enToBnNumber(sRoll)}</div>
-                          </td>
-
-                          {/* Category */}
-                          <td className="p-3">
-                            <span className={cn(
-                              "px-2 py-0.5 rounded text-[10px] font-bold",
-                              sCat === 'আবাসিক' ? "bg-purple-500/10 text-purple-600" : "bg-blue-500/10 text-blue-600"
-                            )}>
-                              {sCat}
-                            </span>
-                          </td>
-
-                          {/* First Entry */}
-                          <td className="p-3 font-mono font-bold text-teal-700 dark:text-teal-300">
-                            {record.firstEntryTime ? (
-                              <span className="flex items-center gap-1">
-                                <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
-                                {record.firstEntryTime}
-                              </span>
-                            ) : (
-                              <span className="text-gray-400 font-normal">—</span>
+                        return (
+                          <tr 
+                            key={sId || index} 
+                            className={cn(
+                              "hover:bg-[var(--color-bg)]/60 transition-colors",
+                              record.isAdmissionCancelled && "bg-rose-500/5",
+                              record.isLate && "bg-amber-500/5"
                             )}
-                          </td>
-
-                          {/* Last Punch */}
-                          <td className="p-3 font-mono text-slate-600 dark:text-slate-300">
-                            {record.lastPunchTime || '—'}
-                          </td>
-
-                          {/* Exit */}
-                          <td className="p-3 font-mono">
-                            {record.lastExitTime ? (
-                              <span className="text-indigo-600 dark:text-indigo-400 font-bold">
-                                {record.lastExitTime}
-                              </span>
-                            ) : record.isMissingExit ? (
-                              <span className="text-rose-500 text-[10px] font-bold">মিসিং (Out নেই)</span>
-                            ) : (
-                              <span className="text-gray-400 font-normal">—</span>
-                            )}
-                          </td>
-
-                          {/* Status */}
-                          <td className="p-3 text-center">
-                            <span className={cn(
-                              "px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1",
-                              record.status === 'present' && "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20",
-                              record.status === 'late' && "bg-amber-500/10 text-amber-600 border border-amber-500/20",
-                              record.status === 'absent' && "bg-rose-500/10 text-rose-600 border border-rose-500/20",
-                              record.status === 'temporarily_cancelled' && "bg-red-600 text-white font-bold"
-                            )}>
-                              {record.status === 'present' && <CheckCircle2 size={11} />}
-                              {record.status === 'late' && <Clock size={11} />}
-                              {record.status === 'absent' && <XCircle size={11} />}
-                              {record.status === 'present' ? 'উপস্থিত' : record.status === 'late' ? 'দেরিতে উপস্থিত' : record.status === 'temporarily_cancelled' ? 'সাময়িক বাতিল' : 'অনুপস্থিত'}
-                            </span>
-                          </td>
-
-                          {/* Late Minutes */}
-                          <td className="p-3 text-center font-mono">
-                            {record.isLate ? (
-                              <span className="text-amber-600 font-bold">
-                                +{enToBnNumber(record.lateMinutes)} মি.
-                              </span>
-                            ) : (
-                              <span className="text-gray-400">০</span>
-                            )}
-                          </td>
-
-                          {/* Total Punches */}
-                          <td className="p-3 text-center font-mono font-bold">
-                            <span className="px-2 py-0.5 rounded bg-[var(--color-bg)] border border-[var(--color-border-main)]">
-                              {enToBnNumber(record.totalPunches || 0)}
-                            </span>
-                          </td>
-
-                          {/* Actions */}
-                          <td className="p-3 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              {/* View Individual Student Attendance Report */}
-                              <button
+                          >
+                            <td className="p-3 text-center font-mono text-[11px] text-[var(--color-text-light)]">
+                              {enToBnNumber((currentPage - 1) * itemsPerPage + index + 1)}
+                            </td>
+                            <td className="p-3 font-mono text-[11px] font-extrabold text-slate-900 dark:text-slate-100 bg-slate-50/50 dark:bg-slate-900/30 border-x border-[var(--color-border-main)]/20">
+                              {sId}
+                            </td>
+                            <td className="p-3">
+                              <div 
                                 onClick={() => setSelectedStudentForReport(student)}
-                                className="px-2.5 py-1 rounded-lg bg-teal-500/10 hover:bg-teal-600 hover:text-white text-teal-700 dark:text-teal-300 font-bold text-xs flex items-center gap-1 transition-all border border-teal-500/20 shadow-2xs cursor-pointer"
-                                title="ব্যক্তিগত সকল হাজিরা ও পাঞ্চ রিপোর্ট দেখুন"
+                                className="font-bold text-[var(--color-text-main)] hover:text-teal-600 cursor-pointer flex items-center gap-1.5"
                               >
-                                <Eye size={13} />
-                                <span>ভিউ</span>
-                              </button>
-
-                              {/* Manual Edit Button */}
-                              <button
-                                onClick={() => {
-                                  setManualEditStudent(student);
-                                  setManualStatus(record.status);
-                                  setManualReason('');
-                                }}
-                                className="p-1.5 rounded-lg bg-[var(--color-bg)] hover:bg-amber-500/10 hover:text-amber-600 text-[var(--color-text-light)] transition-all border border-[var(--color-border-main)]"
-                                title="ম্যানুয়াল সংশোধন"
-                              >
-                                <Edit3 size={14} />
-                              </button>
-
-                              {/* Restore Admission Button if cancelled */}
-                              {record.isAdmissionCancelled && (
-                                <button
-                                  onClick={() => {
-                                    restoreCancelledStudentAdmission(sId, 'এডমিন', 'মঞ্জুরীকৃত পুনর্বহাল', students);
-                                    setDailyDb(getDailyAttendanceDb());
-                                    toast.success('শিক্ষার্থীর ভর্তি সফলভাবে পুনর্বহাল করা হয়েছে!');
-                                  }}
-                                  className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold shadow-2xs"
-                                  title="ভর্তি পুনর্বহাল করুন"
-                                >
-                                  পুনর্বহাল
-                                </button>
+                                <span>{student['শিক্ষার্থীর নাম'] || student.name}</span>
+                                {record.isAdmissionCancelled && (
+                                  <span className="px-1.5 py-0.2 rounded bg-rose-600 text-white text-[9px] font-bold whitespace-nowrap">
+                                    সাময়িক বাতিল
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <div className="font-semibold text-[var(--color-text-main)]">{sClass}</div>
+                              <div className="text-[10px] text-[var(--color-text-light)] font-mono">রোল: {enToBnNumber(sRoll)}</div>
+                            </td>
+                            <td className="p-3">
+                              <span className={cn(
+                                "px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap",
+                                sCat === 'আবাসিক' ? "bg-purple-500/10 text-purple-600" : "bg-blue-500/10 text-blue-600"
+                              )}>
+                                {sCat}
+                              </span>
+                            </td>
+                            <td className="p-3 text-center">
+                              <span className={cn(
+                                "px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap",
+                                record.status === 'present' && "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20",
+                                record.status === 'late' && "bg-amber-500/10 text-amber-600 border border-amber-500/20",
+                                record.status === 'absent' && "bg-rose-500/10 text-rose-600 border border-rose-500/20",
+                                record.status === 'temporarily_cancelled' && "bg-red-600 text-white font-bold"
+                              )}>
+                                {record.status === 'present' && <CheckCircle2 size={11} />}
+                                {record.status === 'late' && <Clock size={11} />}
+                                {record.status === 'absent' && <XCircle size={11} />}
+                                {record.status === 'present' ? 'উপস্থিত' : record.status === 'late' ? 'দেরিতে উপস্থিত' : record.status === 'temporarily_cancelled' ? 'সাময়িক বাতিল' : 'অনুপস্থিত'}
+                              </span>
+                            </td>
+                            <td className="p-3 text-center font-mono">
+                              {record.isLate ? (
+                                <span className="text-amber-600 font-bold whitespace-nowrap">
+                                  {formatDurationBn(record.lateMinutes)}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400">০ মি.</span>
                               )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+                            </td>
+                            <td className="p-3 text-center font-mono font-bold">
+                              <span className="px-2 py-0.5 rounded bg-[var(--color-bg)] border border-[var(--color-border-main)] whitespace-nowrap">
+                                {enToBnNumber(record.totalPunches || 0)}
+                              </span>
+                            </td>
+                            <td className="p-3 font-mono text-center font-bold text-teal-600 dark:text-teal-400">
+                              {p.entry1 !== '—' ? (
+                                <span className="inline-flex items-center gap-1 rounded bg-teal-500/10 px-1.5 py-0.5 whitespace-nowrap">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
+                                  {p.entry1}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400 font-normal">—</span>
+                              )}
+                            </td>
+                            <td className="p-3 font-mono text-center font-bold text-indigo-600 dark:text-indigo-400">
+                              {p.exit1 !== '—' ? (
+                                <span className="inline-flex items-center gap-1 rounded bg-indigo-500/10 px-1.5 py-0.5 whitespace-nowrap">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                                  {p.exit1}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400 font-normal">—</span>
+                              )}
+                            </td>
+                            <td className="p-3 font-mono text-center font-bold text-teal-600 dark:text-teal-400">
+                              {p.entry2 !== '—' ? (
+                                <span className="inline-flex items-center gap-1 rounded bg-teal-500/10 px-1.5 py-0.5 whitespace-nowrap">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
+                                  {p.entry2}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400 font-normal">—</span>
+                              )}
+                            </td>
+                            <td className="p-3 font-mono text-center font-bold text-indigo-600 dark:text-indigo-400">
+                              {p.exit2 !== '—' ? (
+                                <span className="inline-flex items-center gap-1 rounded bg-indigo-500/10 px-1.5 py-0.5 whitespace-nowrap">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                                  {p.exit2}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400 font-normal">—</span>
+                              )}
+                            </td>
+                            <td className="p-3 font-mono text-center font-bold text-teal-600 dark:text-teal-400">
+                              {p.entry3 !== '—' ? (
+                                <span className="inline-flex items-center gap-1 rounded bg-teal-500/10 px-1.5 py-0.5 whitespace-nowrap">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
+                                  {p.entry3}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400 font-normal">—</span>
+                              )}
+                            </td>
+                            <td className="p-3 font-mono text-center font-bold text-indigo-600 dark:text-indigo-400">
+                              {p.exit3 !== '—' ? (
+                                <span className="inline-flex items-center gap-1 rounded bg-indigo-500/10 px-1.5 py-0.5 whitespace-nowrap">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                                  {p.exit3}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400 font-normal">—</span>
+                              )}
+                            </td>
+                            <td className="p-3 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedStudentForReport(student)}
+                                  className="px-2.5 py-1 rounded-lg bg-teal-500/10 hover:bg-teal-600 hover:text-white text-teal-700 dark:text-teal-300 font-bold text-[10px] flex items-center gap-1 transition-all border border-teal-500/20 shadow-2xs cursor-pointer"
+                                >
+                                  <Eye size={12} />
+                                  <span>ভিউ</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setManualEditStudent(student);
+                                    setManualStatus(record.status);
+                                    setManualReason('');
+                                  }}
+                                  className="p-1.5 rounded-lg bg-[var(--color-bg)] hover:bg-amber-500/10 hover:text-amber-600 text-[var(--color-text-light)] transition-all border border-[var(--color-border-main)]"
+                                >
+                                  <Edit3 size={12} />
+                                </button>
+                                {record.isAdmissionCancelled && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      restoreCancelledStudentAdmission(sId, 'এডমিন', 'মঞ্জুরীকৃত পুনর্বহাল', students);
+                                      setDailyDb(getDailyAttendanceDb());
+                                      toast.success('শিক্ষার্থীর ভর্তি সফলভাবে পুনর্বহাল করা হয়েছে!');
+                                    }}
+                                    className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-bold shadow-2xs whitespace-nowrap"
+                                  >
+                                    পুনর্বহাল
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* HIGH-QUALITY PAGINATION CONTROLS */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-[var(--color-card)] p-4 rounded-2xl border border-[var(--color-border-main)] mt-4">
+              <span className="text-xs font-bold text-[var(--color-text-light)]">
+                পৃষ্ঠা {enToBnNumber(currentPage)} / {enToBnNumber(totalPages)} (মোট {enToBnNumber(filteredList.length)} জন শিক্ষার্থী)
+              </span>
+
+              <div className="flex items-center gap-1">
+                {/* First Page */}
+                <button
+                  type="button"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(1)}
+                  className="px-3 py-1.5 text-xs font-bold rounded-xl border border-[var(--color-border-main)] bg-[var(--color-card)] text-[var(--color-text-main)] hover:bg-[var(--color-bg)] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-2xs"
+                >
+                  প্রথম
+                </button>
+
+                {/* Previous Page */}
+                <button
+                  type="button"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  className="px-3 py-1.5 text-xs font-bold rounded-xl border border-[var(--color-border-main)] bg-[var(--color-card)] text-[var(--color-text-main)] hover:bg-[var(--color-bg)] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-2xs"
+                >
+                  পূর্ববর্তী
+                </button>
+
+                {/* Page Number Pills */}
+                {Array.from({ length: Math.min(5, totalPages) }).map((_, i) => {
+                  let pageNum = 1;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (currentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+
+                  const isActive = pageNum === currentPage;
+                  return (
+                    <button
+                      key={pageNum}
+                      type="button"
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={cn(
+                        "w-8 h-8 rounded-xl font-bold text-xs border transition-all flex items-center justify-center shadow-2xs",
+                        isActive
+                          ? "bg-teal-600 text-white border-teal-600"
+                          : "border-[var(--color-border-main)] bg-[var(--color-card)] text-[var(--color-text-main)] hover:bg-[var(--color-bg)]"
+                      )}
+                    >
+                      {enToBnNumber(pageNum)}
+                    </button>
+                  );
+                })}
+
+                {/* Next Page */}
+                <button
+                  type="button"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  className="px-3 py-1.5 text-xs font-bold rounded-xl border border-[var(--color-border-main)] bg-[var(--color-card)] text-[var(--color-text-main)] hover:bg-[var(--color-bg)] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-2xs"
+                >
+                  পরবর্তী
+                </button>
+
+                {/* Last Page */}
+                <button
+                  type="button"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(totalPages)}
+                  className="px-3 py-1.5 text-xs font-bold rounded-xl border border-[var(--color-border-main)] bg-[var(--color-card)] text-[var(--color-text-main)] hover:bg-[var(--color-bg)] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-2xs"
+                >
+                  শেষ
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1238,22 +1882,36 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
         </div>
       )}
 
-      {/* ------------------------------------------------------------- */}
-      {/* TAB 6: CENTRAL ATTENDANCE SETTINGS & RULE ENGINE */}
-      {/* ------------------------------------------------------------- */}
       {activeTab === 'settings' && (
-        <div className="bg-[var(--color-card)] rounded-2xl border border-[var(--color-border-main)] p-6 shadow-sm space-y-6 max-w-4xl">
-          <h3 className="text-lg font-bold text-[var(--color-text-main)] flex items-center gap-2">
-            <SlidersHorizontal className="text-teal-600" size={20} />
-            সেন্ট্রাল হাজিরা রুল ইঞ্জিন ও শিডিউল কনফিগারেশন
-          </h3>
+        <div className="bg-[var(--color-card)] rounded-2xl border border-[var(--color-border-main)] p-6 shadow-sm space-y-6 max-w-5xl">
+          <div className="flex items-center justify-between border-b border-[var(--color-border-main)] pb-4">
+            <div>
+              <h3 className="text-lg font-bold text-[var(--color-text-main)] flex items-center gap-2">
+                <SlidersHorizontal className="text-teal-600" size={20} />
+                সেন্ট্রাল হাজিরা রুল ইঞ্জিন ও শিডিউল কনফিগারেশন
+              </h3>
+              <p className="text-[11px] text-[var(--color-text-light)] mt-1">
+                মাদ্রাসার শিক্ষার্থী (আবাসিক ও অনাবাসিক), শিক্ষক এবং কর্মচারীদের জন্য দৈনিক এন্ট্রি, এক্সিট এবং রুল ইঞ্জিন সেট করুন।
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                saveAttendanceSettings(settings);
+                toast.success('হাজিরা সেটিংস সফলভাবে সংরক্ষিত হয়েছে!');
+              }}
+              className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5"
+            >
+              <Save size={14} />
+              <span>রুল সেটিংস সংরক্ষণ করুন</span>
+            </button>
+          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {/* General & Window Settings */}
             <div className="p-5 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border-main)] space-y-4 shadow-xs">
-              <div className="font-bold text-xs text-[var(--color-text-main)] flex items-center gap-2">
+              <div className="font-bold text-xs text-[var(--color-text-main)] flex items-center gap-2 border-b border-[var(--color-border-main)] pb-2">
                 <Clock size={16} className="text-teal-600" />
-                <span>সাধারণ হাজিরা উইন্ডো:</span>
+                <span>সাধারণ উইন্ডো ও ডুপ্লিকেট ফিল্টার</span>
               </div>
               <div className="space-y-1">
                 <label className="text-[11px] font-bold text-[var(--color-text-light)]">উইন্ডো শুরুর সময়:</label>
@@ -1264,7 +1922,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                     const updated = { ...settings, general: { ...settings.general, windowStart: e.target.value } };
                     setSettings(updated);
                   }}
-                  className="w-full p-2.5 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                  className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
                 />
               </div>
               <div className="space-y-1">
@@ -1276,11 +1934,11 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                     const updated = { ...settings, general: { ...settings.general, windowEnd: e.target.value } };
                     setSettings(updated);
                   }}
-                  className="w-full p-2.5 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                  className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-[var(--color-text-light)]">৩০ সেকেন্ড ডুপ্লিকেট পাঞ্চ ফিল্টার (সেকেন্ড):</label>
+                <label className="text-[11px] font-bold text-[var(--color-text-light)]">ডুপ্লিকেট পাঞ্চ ফিল্টার (সেকেন্ড):</label>
                 <input
                   type="number"
                   value={settings.general.duplicateThresholdSeconds}
@@ -1288,19 +1946,19 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                     const updated = { ...settings, general: { ...settings.general, duplicateThresholdSeconds: Number(e.target.value) } };
                     setSettings(updated);
                   }}
-                  className="w-full p-2.5 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                  className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
                 />
               </div>
             </div>
 
-            {/* Student Standard Times */}
+            {/* Student standard rule */}
             <div className="p-5 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border-main)] space-y-4 shadow-xs">
-              <div className="font-bold text-xs text-[var(--color-text-main)] flex items-center gap-2">
+              <div className="font-bold text-xs text-[var(--color-text-main)] flex items-center gap-2 border-b border-[var(--color-border-main)] pb-2">
                 <Users size={16} className="text-teal-600" />
-                <span>শিক্ষার্থী এন্ট্রি ও লেইট রুল:</span>
+                <span>সাধারণ শিক্ষার্থী ও লেইট রুল</span>
               </div>
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-[var(--color-text-light)]">স্ট্যান্ডার্ড এন্ট্রি টাইম:</label>
+                <label className="text-[11px] font-bold text-[var(--color-text-light)]">স্ট্যান্ডার্ড এন্ট্রি টাইম (অনাবাসিক/জেনারেল):</label>
                 <input
                   type="time"
                   value={settings.student.standardEntry}
@@ -1308,7 +1966,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                     const updated = { ...settings, student: { ...settings.student, standardEntry: e.target.value } };
                     setSettings(updated);
                   }}
-                  className="w-full p-2.5 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                  className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
                 />
               </div>
               <div className="space-y-1">
@@ -1320,7 +1978,7 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                     const updated = { ...settings, student: { ...settings.student, warningAbsenceDays: Number(e.target.value) } };
                     setSettings(updated);
                   }}
-                  className="w-full p-2.5 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                  className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
                 />
               </div>
               <div className="space-y-1">
@@ -1332,21 +1990,370 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
                     const updated = { ...settings, student: { ...settings.student, cancellationAbsenceDays: Number(e.target.value) } };
                     setSettings(updated);
                   }}
-                  className="w-full p-2.5 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                  className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                />
+              </div>
+            </div>
+
+            {/* Non-Residential Student Schedules */}
+            <div className="p-5 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border-main)] space-y-4 shadow-xs">
+              <div className="font-bold text-xs text-[var(--color-text-main)] flex items-center gap-2 border-b border-[var(--color-border-main)] pb-2">
+                <Home size={16} className="text-teal-600" />
+                <span>অনাবাসিক শিক্ষার্থী দৈনিক সময়সূচী</span>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-[var(--color-text-light)]">দৈনিক প্রবেশের সময়:</label>
+                <input
+                  type="time"
+                  value={settings.nonResidentialSchedule?.entryTime || '08:00'}
+                  onChange={(e) => {
+                    const updated = {
+                      ...settings,
+                      nonResidentialSchedule: {
+                        ...(settings.nonResidentialSchedule || { entryTime: '08:00', exitTime: '16:00' }),
+                        entryTime: e.target.value
+                      }
+                    };
+                    setSettings(updated);
+                  }}
+                  className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-[var(--color-text-light)]">দৈনিক প্রস্থানের সময়:</label>
+                <input
+                  type="time"
+                  value={settings.nonResidentialSchedule?.exitTime || '16:00'}
+                  onChange={(e) => {
+                    const updated = {
+                      ...settings,
+                      nonResidentialSchedule: {
+                        ...(settings.nonResidentialSchedule || { entryTime: '08:00', exitTime: '16:00' }),
+                        exitTime: e.target.value
+                      }
+                    };
+                    setSettings(updated);
+                  }}
+                  className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                />
+              </div>
+            </div>
+
+            {/* Residential Student Schedules (Full Customization) */}
+            <div className="p-5 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border-main)] space-y-4 shadow-xs lg:col-span-2">
+              <div className="font-bold text-xs text-[var(--color-text-main)] flex items-center gap-2 border-b border-[var(--color-border-main)] pb-2">
+                <Sparkles size={16} className="text-teal-600" />
+                <span>আবাসিক শিক্ষার্থী পূর্ণাঙ্গ দৈনিক সময়সূচী (দিবস সূচি)</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-[var(--color-text-light)]">সকালে প্রথম এন্ট্রি শুরুর সময়:</label>
+                  <input
+                    type="time"
+                    value={settings.residentialSchedule?.morningEntryStart || '05:00'}
+                    onChange={(e) => {
+                      const updated = {
+                        ...settings,
+                        residentialSchedule: {
+                          ...(settings.residentialSchedule || {}),
+                          morningEntryStart: e.target.value
+                        }
+                      };
+                      setSettings(updated as any);
+                    }}
+                    className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-[var(--color-text-light)]">সকালে স্ট্যান্ডার্ড ক্লাসে প্রবেশের সময়:</label>
+                  <input
+                    type="time"
+                    value={settings.residentialSchedule?.morningStandardEntry || '08:00'}
+                    onChange={(e) => {
+                      const updated = {
+                        ...settings,
+                        residentialSchedule: {
+                          ...(settings.residentialSchedule || {}),
+                          morningStandardEntry: e.target.value
+                        }
+                      };
+                      setSettings(updated as any);
+                    }}
+                    className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-[var(--color-text-light)]">দুপুরে খাবার ও বিরতি এক্সিট সময়:</label>
+                  <input
+                    type="time"
+                    value={settings.residentialSchedule?.lunchExitStart || '12:30'}
+                    onChange={(e) => {
+                      const updated = {
+                        ...settings,
+                        residentialSchedule: {
+                          ...(settings.residentialSchedule || {}),
+                          lunchExitStart: e.target.value
+                        }
+                      };
+                      setSettings(updated as any);
+                    }}
+                    className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-[var(--color-text-light)]">দুপুর বিরতি শেষে ক্লাসে ফেরার সময়:</label>
+                  <input
+                    type="time"
+                    value={settings.residentialSchedule?.lunchReturnTarget || '14:00'}
+                    onChange={(e) => {
+                      const updated = {
+                        ...settings,
+                        residentialSchedule: {
+                          ...(settings.residentialSchedule || {}),
+                          lunchReturnTarget: e.target.value
+                        }
+                      };
+                      setSettings(updated as any);
+                    }}
+                    className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-[var(--color-text-light)]">বিকেলে খেলাধুলা ও বিরতি এক্সিট সময়:</label>
+                  <input
+                    type="time"
+                    value={settings.residentialSchedule?.afternoonExitStart || '16:30'}
+                    onChange={(e) => {
+                      const updated = {
+                        ...settings,
+                        residentialSchedule: {
+                          ...(settings.residentialSchedule || {}),
+                          afternoonExitStart: e.target.value
+                        }
+                      };
+                      setSettings(updated as any);
+                    }}
+                    className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-[var(--color-text-light)]">সন্ধ্যায় বা মাগরিব পূর্বে ফেরার সময়:</label>
+                  <input
+                    type="time"
+                    value={settings.residentialSchedule?.eveningReturnTarget || '18:00'}
+                    onChange={(e) => {
+                      const updated = {
+                        ...settings,
+                        residentialSchedule: {
+                          ...(settings.residentialSchedule || {}),
+                          eveningReturnTarget: e.target.value
+                        }
+                      };
+                      setSettings(updated as any);
+                    }}
+                    className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-[var(--color-text-light)]">রাতের খাবার ও শয়ন এক্সিট (লক):</label>
+                  <input
+                    type="time"
+                    value={settings.residentialSchedule?.nightExitTime || '22:00'}
+                    onChange={(e) => {
+                      const updated = {
+                        ...settings,
+                        residentialSchedule: {
+                          ...(settings.residentialSchedule || {}),
+                          nightExitTime: e.target.value
+                        }
+                      };
+                      setSettings(updated as any);
+                    }}
+                    className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Teacher Rules and Parameters */}
+            <div className="p-5 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border-main)] space-y-4 shadow-xs">
+              <div className="font-bold text-xs text-[var(--color-text-main)] flex items-center gap-2 border-b border-[var(--color-border-main)] pb-2">
+                <UserCheck size={16} className="text-teal-600" />
+                <span>ওস্তাদ/শিক্ষক হাজিরা ও স্যালারি কর্তন রুল</span>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-[var(--color-text-light)]">স্ট্যান্ডার্ড ওস্তাদ প্রবেশের সময় (ইন):</label>
+                <input
+                  type="time"
+                  value={settings.teacherRule?.standardInTime || '08:00'}
+                  onChange={(e) => {
+                    const updated = {
+                      ...settings,
+                      teacherRule: {
+                        ...(settings.teacherRule || {}),
+                        standardInTime: e.target.value
+                      }
+                    };
+                    setSettings(updated as any);
+                  }}
+                  className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-[var(--color-text-light)]">স্ট্যান্ডার্ড ওস্তাদ প্রস্থানের সময় (আউট):</label>
+                <input
+                  type="time"
+                  value={settings.teacherRule?.standardOutTime || '16:30'}
+                  onChange={(e) => {
+                    const updated = {
+                      ...settings,
+                      teacherRule: {
+                        ...(settings.teacherRule || {}),
+                        standardOutTime: e.target.value
+                      }
+                    };
+                    setSettings(updated as any);
+                  }}
+                  className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-[var(--color-text-light)]">দেরি গ্রেস পিরিয়ড (মিনিট):</label>
+                <input
+                  type="number"
+                  value={settings.teacherRule?.lateGraceMinutes || 15}
+                  onChange={(e) => {
+                    const updated = {
+                      ...settings,
+                      teacherRule: {
+                        ...(settings.teacherRule || {}),
+                        lateGraceMinutes: Number(e.target.value)
+                      }
+                    };
+                    setSettings(updated as any);
+                  }}
+                  className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-[var(--color-text-light)]">৩ দিন দেরির জন্য স্যালারি কর্তন (দিন):</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={settings.teacherRule?.lateDeductionPerLate || 0.5}
+                  onChange={(e) => {
+                    const updated = {
+                      ...settings,
+                      teacherRule: {
+                        ...(settings.teacherRule || {}),
+                        lateDeductionPerLate: Number(e.target.value)
+                      }
+                    };
+                    setSettings(updated as any);
+                  }}
+                  className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                />
+              </div>
+            </div>
+
+            {/* Staff Rules and Parameters */}
+            <div className="p-5 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border-main)] space-y-4 shadow-xs">
+              <div className="font-bold text-xs text-[var(--color-text-main)] flex items-center gap-2 border-b border-[var(--color-border-main)] pb-2">
+                <Briefcase size={16} className="text-teal-600" />
+                <span>কর্মচারী কর্মকর্তা হাজিরা ও ওটি রুল</span>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-[var(--color-text-light)]">স্ট্যান্ডার্ড প্রবেশ সময় (ইন):</label>
+                <input
+                  type="time"
+                  value={settings.staffRule?.standardInTime || '08:00'}
+                  onChange={(e) => {
+                    const updated = {
+                      ...settings,
+                      staffRule: {
+                        ...(settings.staffRule || {}),
+                        standardInTime: e.target.value
+                      }
+                    };
+                    setSettings(updated as any);
+                  }}
+                  className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-[var(--color-text-light)]">স্ট্যান্ডার্ড প্রস্থান সময় (আউট):</label>
+                <input
+                  type="time"
+                  value={settings.staffRule?.standardOutTime || '17:00'}
+                  onChange={(e) => {
+                    const updated = {
+                      ...settings,
+                      staffRule: {
+                        ...(settings.staffRule || {}),
+                        standardOutTime: e.target.value
+                      }
+                    };
+                    setSettings(updated as any);
+                  }}
+                  className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-[var(--color-text-light)]">দেরি গ্রেস পিরিয়ড (মিনিট):</label>
+                <input
+                  type="number"
+                  value={settings.staffRule?.lateGraceMinutes || 15}
+                  onChange={(e) => {
+                    const updated = {
+                      ...settings,
+                      staffRule: {
+                        ...(settings.staffRule || {}),
+                        lateGraceMinutes: Number(e.target.value)
+                      }
+                    };
+                    setSettings(updated as any);
+                  }}
+                  className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-[var(--color-text-light)]">ওভারটাইম প্রতি ঘণ্টার রেট (টাকা):</label>
+                <input
+                  type="number"
+                  value={settings.staffRule?.overtimeHourlyRate || 120}
+                  onChange={(e) => {
+                    const updated = {
+                      ...settings,
+                      staffRule: {
+                        ...(settings.staffRule || {}),
+                        overtimeHourlyRate: Number(e.target.value)
+                      }
+                    };
+                    setSettings(updated as any);
+                  }}
+                  className="w-full p-2 rounded-xl bg-[var(--color-card)] border border-[var(--color-border-main)] text-xs font-mono font-bold text-[var(--color-text-main)] focus:outline-hidden focus:ring-1 focus:ring-teal-500 shadow-2xs"
                 />
               </div>
             </div>
           </div>
 
-          <button
-            onClick={() => {
-              saveAttendanceSettings(settings);
-              toast.success('হাজিরা সেটিংস সফলভাবে সংরক্ষিত হয়েছে!');
-            }}
-            className="px-6 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-sm transition-all"
-          >
-            রুল ইঞ্জিন সেটিংস সংরক্ষণ করুন
-          </button>
+          <div className="flex justify-end pt-4 border-t border-[var(--color-border-main)]">
+            <button
+              onClick={() => {
+                saveAttendanceSettings(settings);
+                toast.success('হাজিরা সেটিংস সফলভাবে সংরক্ষিত হয়েছে!');
+              }}
+              className="px-6 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-sm transition-all"
+            >
+              রুল ইঞ্জিন সেটিংস সংরক্ষণ করুন
+            </button>
+          </div>
         </div>
       )}
 
@@ -1720,6 +2727,20 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({
           </div>
         )}
       </AnimatePresence>
+
+      {/* Tipsoi Biometric API Advanced Sync Modal */}
+      <TipsoiSyncModal
+        isOpen={showTipsoiModal}
+        onClose={() => setShowTipsoiModal(false)}
+        selectedDate={selectedDate}
+        students={students}
+        onApplyAttendance={(syncedMap, syncDate) => {
+          const raw = getRawPunches();
+          processAttendanceEngine(raw, students, syncDate, settings);
+          setDailyDb(getDailyAttendanceDb());
+          notifyAttendanceUpdate();
+        }}
+      />
     </div>
   );
 };

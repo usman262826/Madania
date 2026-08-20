@@ -17,7 +17,8 @@ import {
   TipsoiPunchRecord, 
   normalizeIdentifier, 
   matchPunchesToStaffAndTeachers,
-  MatchedStaffPunchResult
+  MatchedStaffPunchResult,
+  extractDateAndHHMM
 } from './tipsoiAttendanceService';
 
 // Storage keys
@@ -237,55 +238,42 @@ export const findStudentForIdentifier = (token: string, students: Student[]): St
   const clean = normalizeIdentifier(token);
   if (!clean) return null;
 
+  // 1. Priority 1: Exact Registration / ID Number match
   for (const s of students) {
     const sId = normalizeIdentifier(s.id || s['রেজিস্ট্রেশন/আইডি নম্বর'] || s['রেজিস্ট্রেশন/আইডি'] || s['আবেদন নং']);
-    const sRoll = normalizeIdentifier(s['রোল নম্বর'] || s['রোল'] || s.roll);
-    const sCard = normalizeIdentifier(s['কার্ড নম্বর'] || s.card_no || s.rfid || s['RFID']);
-    const sMobileMom = String(s['মোবাইল (মা)'] || '').replace(/\D/g, '');
-    const sMobileDad = String(s['মোবাইল (বাবা/ভাই)'] || s['অভিভাবকের মোবাইল'] || s.mobile || '').replace(/\D/g, '');
-    const sName = normalizeIdentifier(s['শিক্ষার্থীর নাম'] || s.name);
-
-    if (sId && (sId === clean || sId.endsWith(clean) || clean.endsWith(sId))) return s;
-    if (sCard && sCard === clean) return s;
-    if (sRoll && sRoll === clean) return s;
-    if (sMobileMom && sMobileMom.endsWith(clean)) return s;
-    if (sMobileDad && sMobileDad.endsWith(clean)) return s;
-    if (sName && (sName === clean || sName.includes(clean))) return s;
+    if (sId && sId === clean) return s;
+    // Also match numeric ID ignoring leading zeroes e.g. "00101" vs "101"
+    if (sId && /^\d+$/.test(sId) && /^\d+$/.test(clean) && parseInt(sId, 10) === parseInt(clean, 10)) {
+      return s;
+    }
   }
+
+  // 2. Priority 2: Exact RFID / Card Number match
+  for (const s of students) {
+    const sCard = normalizeIdentifier(s['কার্ড নম্বর'] || s.card_no || s.rfid || s['RFID']);
+    if (sCard && sCard === clean) return s;
+  }
+
+  // 3. Priority 3: Exact Mobile Number (requires at least 10 digits)
+  const cleanPhone = String(token).replace(/\D/g, '');
+  if (cleanPhone.length >= 10) {
+    for (const s of students) {
+      const sMobileMom = String(s['মোবাইল (মা)'] || '').replace(/\D/g, '');
+      const sMobileDad = String(s['মোবাইল (বাবা/ভাই)'] || s['অভিভাবকের মোবাইল'] || s.mobile || '').replace(/\D/g, '');
+      if ((sMobileMom && sMobileMom === cleanPhone) || (sMobileDad && sMobileDad === cleanPhone)) {
+        return s;
+      }
+    }
+  }
+
   return null;
 };
 
 // -------------------------------------------------------------
 // HELPER: Parse and extract time info (HH:mm) and timestamp
 // -------------------------------------------------------------
-export const parsePunchTime = (rawTimeStr: string): { timeHHMM: string; dateYYYYMMDD: string; fullTimestampMs: number } => {
-  let dateStr = new Date().toISOString().split('T')[0];
-  let timeStr = '08:00';
-  let timestampMs = Date.now();
-
-  if (!rawTimeStr) {
-    return { timeHHMM: timeStr, dateYYYYMMDD: dateStr, fullTimestampMs: timestampMs };
-  }
-
-  try {
-    const str = String(rawTimeStr).trim();
-    if (str.includes(' ')) {
-      const [d, t] = str.split(' ');
-      if (d && d.length >= 8) dateStr = d.slice(0, 10);
-      if (t) timeStr = t.slice(0, 5);
-      const parsedD = new Date(str.replace(' ', 'T'));
-      if (!isNaN(parsedD.getTime())) timestampMs = parsedD.getTime();
-    } else if (str.includes('T')) {
-      dateStr = str.split('T')[0];
-      timeStr = str.split('T')[1]?.slice(0, 5) || '08:00';
-      const parsedD = new Date(str);
-      if (!isNaN(parsedD.getTime())) timestampMs = parsedD.getTime();
-    } else if (str.includes(':')) {
-      timeStr = str.slice(0, 5);
-    }
-  } catch {}
-
-  return { timeHHMM: timeStr, dateYYYYMMDD: dateStr, fullTimestampMs: timestampMs };
+export const parsePunchTime = (rawTimeStr: string, fallbackDate?: string): { timeHHMM: string; dateYYYYMMDD: string; fullTimestampMs: number } => {
+  return extractDateAndHHMM(rawTimeStr, fallbackDate);
 };
 
 // -------------------------------------------------------------
@@ -305,10 +293,11 @@ export const processAttendanceEngine = (
   const dayRecords: Record<string, StudentAttendanceRecord> = { ...(dailyDb[targetDate] || {}) };
   const existingSentLogs = getSentMessageLogs();
   
-  // Filter raw punches for targetDate
+  // Filter raw punches strictly for targetDate using robust date normalizer
   const dayPunches = rawPunches.filter(p => {
-    const pDate = p.punchTime.includes(' ') ? p.punchTime.split(' ')[0] : p.punchTime.slice(0, 10);
-    return !pDate || pDate === targetDate;
+    const rawStr = p.punchTime || p.loggedTime || p.syncTime || '';
+    const parsed = extractDateAndHHMM(rawStr, targetDate);
+    return parsed.dateYYYYMMDD === targetDate;
   });
 
   // Group raw punches by Student
@@ -705,6 +694,10 @@ export const startAttendanceAutoSync = (
           }
         });
 
+        if (newPunchesAdded > 0) {
+          saveRawPunches(rawExisting);
+        }
+
         // 1. Run Processing Engine for Students
         if (students && students.length > 0) {
           processAttendanceEngine(rawExisting, students, today, settings);
@@ -808,6 +801,8 @@ export const syncAllAttendanceForDate = async (
         });
       }
     });
+
+    saveRawPunches(rawExisting);
 
     let studentMatchedCount = 0;
     if (students.length > 0) {

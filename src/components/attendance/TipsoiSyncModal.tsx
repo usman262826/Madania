@@ -25,12 +25,15 @@ import {
   matchPunchesToStudents, 
   matchPunchesToStaffAndTeachers,
   checkTipsoiConnection, 
-  TipsoiPunchRecord 
+  TipsoiPunchRecord,
+  extractDateAndHHMM
 } from '../../services/tipsoiAttendanceService';
 import { 
   processStaffAndTeacherAttendanceEngine,
   getAttendanceSettings,
-  notifyAttendanceUpdate
+  notifyAttendanceUpdate,
+  getRawPunches,
+  saveRawPunches
 } from '../../services/attendanceEngine';
 import { enToBnNumber, cn } from '../../lib/utils';
 import { Student } from '../../types';
@@ -160,6 +163,37 @@ export const TipsoiSyncModal: React.FC<TipsoiSyncModalProps> = ({
 
   const handleApplyToSystem = () => {
     let appliedCount = 0;
+
+    // Save fetched raw punches to localStorage
+    if (rawPunches && rawPunches.length > 0) {
+      const existing = getRawPunches();
+      const existingKeys = new Set(existing.map(r => `${r.userId}_${r.punchTime}`));
+      rawPunches.forEach(p => {
+        const rawTime = p.logged_time || p.punch_time || p.time || p.sync_time || '';
+        const parsed = extractDateAndHHMM(rawTime, syncDate);
+        const normalizedTime = `${parsed.dateYYYYMMDD} ${parsed.timeHHMM}:00`;
+        const userId = String(p.person_identifier || p.identifier || p.emp_id || p.user_id || p.card_no || '').trim();
+        const key = `${userId}_${normalizedTime}`;
+        if (!existingKeys.has(key)) {
+          existingKeys.add(key);
+          existing.push({
+            id: `raw_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            deviceId: String(p.device_identifier || 'TIPSOI-01'),
+            deviceName: p.device_name || 'টিপসই স্মার্ট ডিভাইস',
+            userId,
+            userType: 'student',
+            punchTime: normalizedTime,
+            loggedTime: p.logged_time,
+            syncTime: p.sync_time,
+            receivedTime: new Date().toISOString(),
+            punchType: p.punch_type || 'fingerprint',
+            rawApiData: p.raw || p,
+            processingStatus: 'processed',
+          });
+        }
+      });
+      saveRawPunches(existing);
+    }
 
     // 1. Apply Student Attendance
     if ((syncScope === 'all' || syncScope === 'students') && matchedStudentResults) {

@@ -112,6 +112,121 @@ export const normalizeIdentifier = (val: any): string => {
 };
 
 /**
+ * Robust Date & Time extractor supporting YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY, ISO strings, and Unix timestamps.
+ */
+export const extractDateAndHHMM = (
+  rawTimeStr: any,
+  fallbackDate: string = new Date().toISOString().split('T')[0]
+): { dateYYYYMMDD: string; timeHHMM: string; fullTimestampMs: number } => {
+  let dateYYYYMMDD = fallbackDate;
+  let timeHHMM = '08:00';
+  let fullTimestampMs = Date.now();
+
+  if (rawTimeStr === null || rawTimeStr === undefined || rawTimeStr === '') {
+    const ms = new Date(`${dateYYYYMMDD}T${timeHHMM}:00`).getTime();
+    return { dateYYYYMMDD, timeHHMM, fullTimestampMs: isNaN(ms) ? Date.now() : ms };
+  }
+
+  // Handle Unix timestamp numeric or numeric string
+  if (typeof rawTimeStr === 'number' || (/^\d+$/.test(String(rawTimeStr).trim()) && String(rawTimeStr).trim().length >= 9)) {
+    let num = Number(rawTimeStr);
+    if (num < 1e11) num *= 1000; // convert seconds to ms
+    const d = new Date(num);
+    if (!isNaN(d.getTime())) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      return {
+        dateYYYYMMDD: `${y}-${m}-${day}`,
+        timeHHMM: `${hh}:${mm}`,
+        fullTimestampMs: d.getTime()
+      };
+    }
+  }
+
+  const str = String(rawTimeStr).trim();
+
+  // Handle ISO format e.g. "2026-08-19T08:30:15"
+  if (str.includes('T')) {
+    const [dPart, tPart] = str.split('T');
+    if (dPart && /^\d{4}-\d{2}-\d{2}$/.test(dPart)) {
+      dateYYYYMMDD = dPart;
+    }
+    if (tPart) {
+      const cleanT = tPart.split('.')[0].split('Z')[0];
+      const parts = cleanT.split(':');
+      if (parts.length >= 2) {
+        timeHHMM = `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+      }
+    }
+    const parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) {
+      fullTimestampMs = parsed.getTime();
+      const y = parsed.getFullYear();
+      const m = String(parsed.getMonth() + 1).padStart(2, '0');
+      const day = String(parsed.getDate()).padStart(2, '0');
+      dateYYYYMMDD = `${y}-${m}-${day}`;
+    }
+    return { dateYYYYMMDD, timeHHMM, fullTimestampMs };
+  }
+
+  // Handle space separated e.g. "2026-08-19 08:30:15" or "19/08/2026 08:30:15"
+  if (str.includes(' ')) {
+    const parts = str.split(/\s+/);
+    const dateSegment = parts[0];
+    const timeSegment = parts[1];
+
+    if (dateSegment) {
+      if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(dateSegment)) {
+        const [y, m, d] = dateSegment.split(/[-/]/);
+        dateYYYYMMDD = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+      } else if (/^\d{1,2}[-/]\d{1,2}[-/]\d{4}$/.test(dateSegment)) {
+        const [d, m, y] = dateSegment.split(/[-/]/);
+        dateYYYYMMDD = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+      }
+    }
+
+    if (timeSegment) {
+      const tParts = timeSegment.split(':');
+      if (tParts.length >= 2) {
+        timeHHMM = `${tParts[0].padStart(2, '0')}:${tParts[1].padStart(2, '0')}`;
+      }
+    }
+
+    const ms = new Date(`${dateYYYYMMDD}T${timeHHMM}:00`).getTime();
+    return { dateYYYYMMDD, timeHHMM, fullTimestampMs: isNaN(ms) ? Date.now() : ms };
+  }
+
+  // Handle date-only "YYYY-MM-DD" or "DD/MM/YYYY"
+  if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(str)) {
+    const [y, m, d] = str.split(/[-/]/);
+    dateYYYYMMDD = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    const ms = new Date(`${dateYYYYMMDD}T${timeHHMM}:00`).getTime();
+    return { dateYYYYMMDD, timeHHMM, fullTimestampMs: isNaN(ms) ? Date.now() : ms };
+  }
+  if (/^\d{1,2}[-/]\d{1,2}[-/]\d{4}$/.test(str)) {
+    const [d, m, y] = str.split(/[-/]/);
+    dateYYYYMMDD = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    const ms = new Date(`${dateYYYYMMDD}T${timeHHMM}:00`).getTime();
+    return { dateYYYYMMDD, timeHHMM, fullTimestampMs: isNaN(ms) ? Date.now() : ms };
+  }
+
+  // Handle time-only "08:30:15" or "08:30"
+  if (/^\d{1,2}:\d{1,2}(:\d{1,2})?$/.test(str)) {
+    const tParts = str.split(':');
+    timeHHMM = `${tParts[0].padStart(2, '0')}:${tParts[1].padStart(2, '0')}`;
+    dateYYYYMMDD = fallbackDate;
+    const ms = new Date(`${dateYYYYMMDD}T${timeHHMM}:00`).getTime();
+    return { dateYYYYMMDD, timeHHMM, fullTimestampMs: isNaN(ms) ? Date.now() : ms };
+  }
+
+  const ms = new Date(`${dateYYYYMMDD}T${timeHHMM}:00`).getTime();
+  return { dateYYYYMMDD, timeHHMM, fullTimestampMs: isNaN(ms) ? Date.now() : ms };
+};
+
+/**
  * Helper to fetch via server-side proxy to completely bypass browser CORS limitations,
  * with direct fetch fallback.
  */
@@ -300,9 +415,12 @@ export const fetchTipsoiAttendanceLogs = async (
         const parsedList: TipsoiPunchRecord[] = [];
         json.attendances.data.forEach((item: any) => {
           const logsObj = item.logs || {};
-          // Check for targetDate in logs
-          const dateLog = logsObj[targetDate] || Object.values(logsObj)[0];
-          const startTime = dateLog?.start || item.start || '';
+          // Check for targetDate in logs ONLY — do not fall back to other days or random items!
+          const dateLog = logsObj[targetDate];
+          if (!dateLog) return;
+          
+          const startTime = dateLog.start || dateLog.in || dateLog.logged_time || dateLog.time || '';
+          if (!startTime) return;
           
           parsedList.push({
             id: item.person_id || item.project_id,
@@ -318,7 +436,7 @@ export const fetchTipsoiAttendanceLogs = async (
             secondary_display_text: item.secondary_display_text,
             punch_time: startTime,
             logged_time: startTime,
-            date: dateLog?.date || targetDate,
+            date: targetDate,
             punch_type: 'biometric',
             status: 'present',
             device_name: 'টিপসই স্মার্ট ডিভাইস',
@@ -360,16 +478,20 @@ export const fetchTipsoiAttendanceLogs = async (
     }
   }
 
-  // Filter punches matching the targetDate if date is present in timestamp
+  // Filter punches matching the targetDate strictly
   if (allPunches.length > 0 && targetDate) {
     const filtered = allPunches.filter(p => {
-      if (!p.punch_time && !p.date) return true;
-      const punchDateStr = (p.punch_time || p.date || '').slice(0, 10);
-      return !punchDateStr || punchDateStr === targetDate;
+      const rawStr = p.punch_time || p.logged_time || p.sync_time || p.time || p.date || '';
+      if (!rawStr) return false;
+      const parsed = extractDateAndHHMM(rawStr, targetDate);
+      if (parsed.dateYYYYMMDD !== targetDate) return false;
+
+      // Normalize punch_time on the object so downstream handlers get uniform YYYY-MM-DD HH:mm:ss
+      p.punch_time = `${parsed.dateYYYYMMDD} ${parsed.timeHHMM}:00`;
+      p.date = parsed.dateYYYYMMDD;
+      return true;
     });
-    if (filtered.length > 0) {
-      allPunches = filtered;
-    }
+    allPunches = filtered;
   }
 
   return { punches: allPunches, rawResponse: successResponse };
@@ -463,55 +585,80 @@ export const matchPunchesToStudents = (
       punch.secondary_display_text,
     ];
 
-    rawFields.forEach((f) => {
-      if (f !== null && f !== undefined && f !== '') {
-        const str = String(f).trim();
-        candidateTokens.push(str);
-        // If string contains separators like "Name-1234" or "Name_1001", add separated sub-parts
-        if (str.includes('-') || str.includes('_') || str.includes(' ')) {
-          const parts = str.split(/[-_\s]+/);
-          parts.forEach(p => {
-            if (p.trim()) candidateTokens.push(p.trim());
-          });
-        }
-      }
-    });
+    // Priority 1 Fields (Specific ID / Card tokens)
+    const primaryFields = [
+      punch.person_identifier,
+      punch.identifier,
+      punch.emp_id,
+      punch.employee_id,
+      punch.card_no,
+      punch.rfid,
+      punch.student_id,
+    ];
+
+    // Priority 2 Fields (Name / Display tokens)
+    const secondaryFields = [
+      punch.name,
+      punch.primary_display_text,
+      punch.secondary_display_text,
+    ];
 
     let matchedStudent: any = null;
 
-    for (const token of candidateTokens) {
-      const normalized = normalizeIdentifier(token);
-      if (!normalized) continue;
+    // Check Primary Fields first against Student ID and Card maps
+    for (const f of primaryFields) {
+      if (!f) continue;
+      const str = String(f).trim();
+      const norm = normalizeIdentifier(str);
+      if (!norm) continue;
 
-      // 1. Match by ID / Reg No
-      if (studentById.has(normalized)) {
-        matchedStudent = studentById.get(normalized);
+      if (studentById.has(norm)) {
+        matchedStudent = studentById.get(norm);
+        break;
+      }
+      if (studentByCard.has(norm)) {
+        matchedStudent = studentByCard.get(norm);
         break;
       }
 
-      // 2. Match by RFID / Card No
-      if (studentByCard.has(normalized)) {
-        matchedStudent = studentByCard.get(normalized);
-        break;
+      // Check separated tokens if string has dashes/underscores/spaces e.g. "STUDENT-1001"
+      if (str.includes('-') || str.includes('_') || str.includes(' ')) {
+        const parts = str.split(/[-_\s]+/);
+        for (const p of parts) {
+          const pNorm = normalizeIdentifier(p);
+          if (pNorm && studentById.has(pNorm)) {
+            matchedStudent = studentById.get(pNorm);
+            break;
+          }
+          if (pNorm && studentByCard.has(pNorm)) {
+            matchedStudent = studentByCard.get(pNorm);
+            break;
+          }
+        }
+        if (matchedStudent) break;
       }
+    }
 
-      // 3. Match by Mobile
-      const cleanNum = token.replace(/[^0-9]/g, '');
-      if (cleanNum.length >= 10 && studentByMobile.has(cleanNum)) {
-        matchedStudent = studentByMobile.get(cleanNum);
-        break;
-      }
+    // Check Secondary / Mobile / Exact Name match if not matched
+    if (!matchedStudent) {
+      for (const f of secondaryFields) {
+        if (!f) continue;
+        const str = String(f).trim();
+        const norm = normalizeIdentifier(str);
+        if (!norm) continue;
 
-      // 4. Match by Roll
-      if (studentByRoll.has(normalized)) {
-        matchedStudent = studentByRoll.get(normalized);
-        break;
-      }
+        // Mobile check
+        const cleanNum = str.replace(/[^0-9]/g, '');
+        if (cleanNum.length >= 10 && studentByMobile.has(cleanNum)) {
+          matchedStudent = studentByMobile.get(cleanNum);
+          break;
+        }
 
-      // 5. Match by Name
-      if (studentByName.has(normalized)) {
-        matchedStudent = studentByName.get(normalized);
-        break;
+        // Exact Name check (length > 3)
+        if (norm.length > 3 && studentByName.has(norm)) {
+          matchedStudent = studentByName.get(norm);
+          break;
+        }
       }
     }
 

@@ -1574,6 +1574,9 @@ export const Analytics: React.FC<AnalyticsProps> = ({
   const [showRechargeModal, setShowRechargeModal] = React.useState<boolean>(false);
   const [rechargeAmount, setRechargeAmount] = React.useState<number>(1000);
   const [showJamatAttendanceTable, setShowJamatAttendanceTable] = React.useState<boolean>(true);
+  const [showAcademicMessageLedger, setShowAcademicMessageLedger] = React.useState<boolean>(false);
+  const [showFinancialLedger, setShowFinancialLedger] = React.useState<boolean>(false);
+  const [showOverdueAlerts, setShowOverdueAlerts] = React.useState<boolean>(false);
 
   // Subscribe to live background machine punch updates and messaging engine updates
   React.useEffect(() => {
@@ -2254,52 +2257,6 @@ export const Analytics: React.FC<AnalyticsProps> = ({
 
   return (
     <div className="space-y-6 sm:space-y-8 font-hind-siliguri">
-      {/* Top Automated Overdue Student Fees Alert Banner */}
-      {overdueAlertData.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-gradient-to-r from-rose-500/15 via-amber-500/10 to-rose-500/15 border-2 border-rose-500/30 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 text-left shadow-lg font-hind-siliguri"
-        >
-          <div className="flex items-start sm:items-center gap-3.5">
-            <div className="w-11 h-11 rounded-2xl bg-rose-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-rose-500/30 font-black animate-pulse">
-              <Bell size={22} className="stroke-[2.5]" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap mb-1">
-                <span className="bg-rose-500 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider animate-pulse">
-                  অটোমেটিক অ্যালার্ট
-                </span>
-                <h3 className="text-sm sm:text-base font-black text-rose-700 dark:text-rose-400">
-                  শিক্ষার্থীদের বকেয়া ফি সতর্কতা নোটিফিকেশন!
-                </h3>
-              </div>
-              <p className="text-xs font-bold text-text-main/80 leading-relaxed">
-                বর্তমানে <span className="text-rose-600 dark:text-rose-400 font-black">{enToBnNumber(overdueAlertData.length.toString())} জন</span> শিক্ষার্থীর সর্বমোট <span className="text-rose-600 dark:text-rose-400 font-black">৳ {enToBnNumber(totalOverdueAmount.toString())}</span> টাকা ফি পরিশোধ বকেয়া রয়েছে।
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
-            <button
-              onClick={triggerAutomatedSms}
-              className="px-3.5 py-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
-            >
-              <MessageSquare size={14} /> তাগাদা এসএমএস
-            </button>
-            <button
-              onClick={() => {
-                const el = document.getElementById("overdue-fees-alert-hub");
-                if (el) el.scrollIntoView({ behavior: "smooth" });
-                else if (setActiveTab) setActiveTab("student-fees");
-              }}
-              className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-black rounded-xl shadow-md shadow-rose-600/20 transition-all cursor-pointer flex items-center gap-1.5"
-            >
-              বকেয়া তালিকা দেখুন ➔
-            </button>
-          </div>
-        </motion.div>
-      )}
-
       {/* GREETING_REMOVED */}
 
       {/* Mobile-First Greeting and Status Summary Card (Inspired by Image 2, Let's become more productive) */}
@@ -2528,29 +2485,29 @@ export const Analytics: React.FC<AnalyticsProps> = ({
                   <UserCheck size={20} className="stroke-[2.5]" />
                 </div>
                 <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-full text-[10px] font-black text-emerald-600 dark:text-emerald-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>মেশিন লাইভ</span>
+                  <span style={{ borderColor: '#016b4b' }} className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span style={{ color: '#007d59' }}>মেশিন লাইভ</span>
                 </div>
               </div>
               <div className="mt-2.5">
-                <p className="text-text-light/50 font-bold text-[10px] uppercase tracking-wider mb-0.5">রিয়েল-টাইম দৈনিক হাজিরা</p>
+                <p className="text-text-light/50 font-bold text-[10px] uppercase tracking-wider mb-0.5">শিক্ষার্থীদের রিয়েল-টাইম দৈনিক হাজিরা</p>
                 <div className="flex items-baseline gap-2.5 flex-wrap">
                   <div className="flex items-baseline gap-1">
                     <span className="text-[11px] font-bold text-text-light/70">উপস্থিত:</span>
-                    <h2 className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
+                    <h2 style={{ color: '#007f82' }} className="text-xl sm:text-2xl font-black tracking-tight">
                       {enToBnNumber(dailyAttendanceStats.present.toString())} জন
                     </h2>
                   </div>
                   <span className="text-border-main text-sm font-light">|</span>
                   <div className="flex items-baseline gap-1">
                     <span className="text-[11px] font-bold text-text-light/70">অনুপস্থিত:</span>
-                    <h2 className="text-xl sm:text-2xl font-black text-rose-600 dark:text-rose-400 tracking-tight">
+                    <h2 style={{ color: '#c10000' }} className="text-xl sm:text-2xl font-black tracking-tight">
                       {enToBnNumber(dailyAttendanceStats.absent.toString())} জন
                     </h2>
                   </div>
                 </div>
                 <div className="flex items-center justify-between mt-3 pt-2 border-t border-border-main/40 text-[10px] font-bold text-text-light/70">
-                  <span className="flex items-center gap-1.5 text-emerald-600 font-black">
+                  <span style={{ color: '#009f95' }} className="flex items-center gap-1.5 font-black">
                     উপস্থিতির হার: {enToBnNumber(dailyAttendanceStats.percentage.toString())}%
                   </span>
                   <span className="text-primary font-black">হাজিরা খতিয়ান ➔</span>
@@ -2600,43 +2557,53 @@ export const Analytics: React.FC<AnalyticsProps> = ({
           </div>
 
           {/* Academic Real-Time Message & Attendance Tracking Section */}
-          <div className="bg-card rounded-2xl border border-border-main/60 p-4 sm:p-6 shadow-sm space-y-5">
-            {/* Header & SMS Metrics Ribbon */}
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-border-main/40 pb-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold">
-                    <MessageSquare size={16} />
-                  </div>
-                  <h4 className="text-base sm:text-lg font-black text-text-main">
-                    একাডেমিক মেসেজ ও অভিভাবক নোটিফিকেশন খতিয়ান
-                  </h4>
+          <div className="bg-card rounded-2xl border border-border-main/60 p-4 sm:p-6 shadow-sm space-y-4">
+            <button
+              onClick={() => setShowAcademicMessageLedger(!showAcademicMessageLedger)}
+              className="w-full flex items-center justify-between p-3 bg-muted/20 hover:bg-muted/40 rounded-xl border border-border-main/50 text-base font-black text-text-main transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold">
+                  <MessageSquare size={16} />
                 </div>
-                <p className="text-xs text-text-light/70 font-medium mt-1">
-                  বায়োমেট্রিক হাজিরা পাঞ্চ, লেট এলার্ট, অনুপস্থিতি ও বকেয়া ফি সংক্রান্ত সকল অটোমেটিক এসএমএস স্ট্যাটাস
-                </p>
+                <span>একাডেমিক মেসেজ ও অভিভাবক নোটিফিকেশন খতিয়ান</span>
               </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  onClick={() => setShowRechargeModal(true)}
-                  className="px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Plus size={14} />
-                  <span>এসএমএস রিচার্জ</span>
-                </button>
-                <button
-                  onClick={() => setActiveTab?.("attendance-messaging")}
-                  className="px-3 py-2 bg-primary hover:bg-primary/90 text-white rounded-xl text-xs font-black transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-                >
-                  <Send size={14} />
-                  <span>মেসেজিং সেটিংস ও রুল</span>
-                </button>
+              <div className="flex items-center gap-2 text-primary text-xs">
+                <span>{showAcademicMessageLedger ? "লুকান" : "টেবিল দেখুন"}</span>
+                <ChevronRight size={16} className={cn("transition-transform", showAcademicMessageLedger ? "rotate-90" : "")} />
               </div>
-            </div>
+            </button>
 
-            {/* Quick SMS Summary Meters */}
+            {showAcademicMessageLedger && (
+              <div className="space-y-5 animate-in fade-in slide-in-from-top-2 duration-300">
+                {/* Header & SMS Metrics Ribbon */}
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-border-main/40 pb-4 pt-2">
+                  <div>
+                    <p className="text-xs text-text-light/70 font-medium">
+                      বায়োমেট্রিক হাজিরা পাঞ্চ, লেট এলার্ট, অনুপস্থিতি ও বকেয়া ফি সংক্রান্ত সকল অটোমেটিক এসএমএস স্ট্যাটাস
+                    </p>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={() => setShowRechargeModal(true)}
+                      className="px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus size={14} />
+                      <span>এসএমএস রিচার্জ</span>
+                    </button>
+                    <button
+                      onClick={() => setActiveTab?.("attendance-messaging")}
+                      className="px-3 py-2 bg-primary hover:bg-primary/90 text-white rounded-xl text-xs font-black transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+                    >
+                      <Send size={14} />
+                      <span>মেসেজিং সেটিংস ও রুল</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quick SMS Summary Meters */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               <div className="p-3 bg-muted/40 rounded-xl border border-border-main/40">
                 <p className="text-[10px] font-bold text-text-light/70 uppercase">মোট এসএমএস প্যাকেজ</p>
@@ -2852,6 +2819,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({
               )}
             </div>
           </div>
+          )}
         </div>
 
         {/* Recharge SMS Balance Modal */}
@@ -2939,6 +2907,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({
             </motion.div>
           </div>
         )}
+      </div>
 
         {/* SECTION 2: আর্থিক ব্যবস্থাপনা */}
         <div className="space-y-4">
@@ -3056,30 +3025,40 @@ export const Analytics: React.FC<AnalyticsProps> = ({
           </div>
 
           {/* Real-time Monthly Income & Expense Table */}
-          <div className="bg-card rounded-[1.8rem] p-5 sm:p-6 border border-border-main/60 shadow-sm space-y-4 font-hind-siliguri">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border-main/50">
+          <div className="bg-card rounded-[1.8rem] p-4 sm:p-5 border border-border-main/60 shadow-sm space-y-4 font-hind-siliguri">
+            <button
+              onClick={() => setShowFinancialLedger(!showFinancialLedger)}
+              className="w-full flex items-center justify-between p-3 bg-muted/20 hover:bg-muted/40 rounded-xl border border-border-main/50 text-base font-black text-text-main transition-colors cursor-pointer"
+            >
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-secondary/10 text-secondary flex items-center justify-center shrink-0">
-                  <Coins size={20} className="stroke-[2.5]" />
+                <div className="w-8 h-8 rounded-lg bg-secondary/10 text-secondary flex items-center justify-center shrink-0">
+                  <Coins size={16} />
                 </div>
-                <div>
-                  <h4 className="text-base sm:text-lg font-black text-text-main tracking-tight">
-                    মাসিক আয় ও ব্যয় বিবরণী টেবিল (রিয়েল-টাইম ডাটা)
-                  </h4>
-                  <p className="text-[11px] text-text-light/55 font-bold">
-                    চলতি বছরের প্রতি মাসের মোট আয় (ফি ও অনুদান), মোট ব্যয় ও নিট ব্যালেন্সের অটোমেটিক লাইভ খতিয়ান
-                  </p>
-                </div>
+                <span>মাসিক আয় ও ব্যয় বিবরণী টেবিল (রিয়েল-টাইম ডাটা)</span>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-1 rounded-full font-black flex items-center gap-1.5 border border-emerald-500/20">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  রিয়েল-টাইম লাইভ ডাটা
-                </span>
+              <div className="flex items-center gap-2 text-secondary text-xs">
+                <span>{showFinancialLedger ? "লুকান" : "টেবিল দেখুন"}</span>
+                <ChevronRight size={16} className={cn("transition-transform", showFinancialLedger ? "rotate-90" : "")} />
               </div>
-            </div>
+            </button>
 
-            <div className="overflow-x-auto border border-border-main/50 rounded-2xl">
+            {showFinancialLedger && (
+              <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border-main/50">
+                  <div>
+                    <p className="text-[11px] text-text-light/55 font-bold">
+                      চলতি বছরের প্রতি মাসের মোট আয় (ফি ও অনুদান), মোট ব্যয় ও নিট ব্যালেন্সের অটোমেটিক লাইভ খতিয়ান
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-1 rounded-full font-black flex items-center gap-1.5 border border-emerald-500/20">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      রিয়েল-টাইম লাইভ ডাটা
+                    </span>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto border border-border-main/50 rounded-2xl">
               <table className="w-full text-xs text-left border-collapse min-w-[650px]">
                 <thead>
                   <tr className="bg-step-bg border-b border-border-main/60 text-text-light/70 font-black uppercase text-[11px]">
@@ -3164,58 +3143,68 @@ export const Analytics: React.FC<AnalyticsProps> = ({
                 </tfoot>
               </table>
             </div>
+              </div>
+            )}
           </div>
 
           {/* Automated Overdue Fees Alert Hub */}
-          <div id="overdue-fees-alert-hub" className="bg-card rounded-[1.8rem] p-5 sm:p-6 border-2 border-rose-500/30 shadow-md space-y-5 font-hind-siliguri relative overflow-hidden">
+          <div id="overdue-fees-alert-hub" className="bg-card rounded-[1.8rem] p-4 sm:p-5 border-2 border-rose-500/30 shadow-md space-y-4 font-hind-siliguri relative overflow-hidden">
             <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 rounded-full blur-2xl pointer-events-none" />
 
-            {/* Header */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-border-main/60">
+            <button
+              onClick={() => setShowOverdueAlerts(!showOverdueAlerts)}
+              className="w-full flex items-center justify-between p-3 bg-rose-500/5 hover:bg-rose-500/10 rounded-xl border border-rose-500/20 text-base font-black text-text-main transition-colors cursor-pointer relative z-10"
+            >
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-rose-500/15 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 border border-rose-500/30 shadow-inner">
-                  <AlertCircle size={24} className="stroke-[2.5]" />
+                <div className="w-8 h-8 rounded-lg bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                  <AlertCircle size={16} />
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h4 className="text-base sm:text-xl font-black text-text-main tracking-tight">
-                      অটোমেটিক বকেয়া ফি অ্যালার্ট ও তাগাদা ম্যানেজমেন্ট প্যানেল
-                    </h4>
-                    <span className="text-[10px] bg-rose-500 text-white font-black px-2.5 py-0.5 rounded-full">
-                      রিয়েল-টাইম
-                    </span>
-                  </div>
-                  <p className="text-xs text-text-light/60 font-bold mt-0.5">
-                    যেসব শিক্ষার্থীর টিউটরিয়াল, খোরাকী বা মাসিক ফি পরিশোধ সময়সীমা অতিক্রান্ত বা বকেয়া পড়েছে তাদের তালিকা ও স্বয়ংক্রিয় তাগাদা ব্যবস্থা
-                  </p>
-                </div>
+                <span>অটোমেটিক বকেয়া ফি অ্যালার্ট ও তাগাদা ম্যানেজমেন্ট প্যানেল</span>
+                <span className="text-[10px] bg-rose-500 text-white px-2 py-0.5 rounded-full font-bold ml-2">
+                  {enToBnNumber(overdueAlertData.length.toString())} জন
+                </span>
               </div>
+              <div className="flex items-center gap-2 text-rose-600 text-xs">
+                <span>{showOverdueAlerts ? "লুকান" : "প্যানেল দেখুন"}</span>
+                <ChevronRight size={16} className={cn("transition-transform", showOverdueAlerts ? "rotate-90" : "")} />
+              </div>
+            </button>
 
-              {/* Header Action Buttons */}
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={triggerAutomatedSms}
-                  className="px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shadow-sm"
-                >
-                  <MessageSquare size={15} /> তাগাদা এসএমএস পাঠান
-                </button>
-                <button
-                  type="button"
-                  onClick={() => window.print()}
-                  className="px-4 py-2.5 bg-step-bg hover:bg-border-main/30 text-text-main border border-border-main/60 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2"
-                >
-                  <FileText size={15} /> বকেয়া রিপোর্ট প্রিন্ট
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab && setActiveTab("student-fees")}
-                  className="px-4.5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shadow-lg shadow-rose-600/20"
-                >
-                  <Coins size={15} /> ফি আদায় মডিউল ➔
-                </button>
-              </div>
-            </div>
+            {showOverdueAlerts && (
+              <div className="space-y-5 animate-in fade-in slide-in-from-top-2 duration-300 relative z-10">
+                {/* Header */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-border-main/60 pt-2">
+                  <div>
+                    <p className="text-[11px] text-text-light/60 font-bold">
+                      যেসব শিক্ষার্থীর টিউটরিয়াল, খোরাকী বা মাসিক ফি পরিশোধ সময়সীমা অতিক্রান্ত বা বকেয়া পড়েছে তাদের তালিকা ও স্বয়ংক্রিয় তাগাদা ব্যবস্থা
+                    </p>
+                  </div>
+
+                  {/* Header Action Buttons */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={triggerAutomatedSms}
+                      className="px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shadow-sm"
+                    >
+                      <MessageSquare size={15} /> তাগাদা এসএমএস পাঠান
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="px-4 py-2.5 bg-step-bg hover:bg-border-main/30 text-text-main border border-border-main/60 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2"
+                    >
+                      <FileText size={15} /> বকেয়া রিপোর্ট প্রিন্ট
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab && setActiveTab("student-fees")}
+                      className="px-4.5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 shadow-lg shadow-rose-600/20"
+                    >
+                      <Coins size={15} /> ফি আদায় মডিউল ➔
+                    </button>
+                  </div>
+                </div>
 
             {/* SMS Notice Success Toast */}
             {smsNoticeSent && (
@@ -3356,6 +3345,8 @@ export const Analytics: React.FC<AnalyticsProps> = ({
                 </tbody>
               </table>
             </div>
+              </div>
+            )}
           </div>
         </div>
 

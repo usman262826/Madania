@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   MessageSquare, 
   Send, 
@@ -50,6 +50,19 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
   const [selectedEventFilter, setSelectedEventFilter] = useState<string>('all');
   const [testStudentId, setTestStudentId] = useState<string>(() => students[0]?.id || '101');
   const [isSendingTest, setIsSendingTest] = useState(false);
+  const [searchStudentTerm, setSearchStudentTerm] = useState('');
+
+  const filteredStudentsForOverrides = useMemo(() => {
+    return students.filter(student => {
+      if (!searchStudentTerm) return true;
+      const term = searchStudentTerm.toLowerCase();
+      const sName = String(student['শিক্ষার্থীর নাম'] || student.name || '').toLowerCase();
+      const sId = String(student.id || student['রেজিস্ট্রেশন/আইডি নম্বর'] || '').toLowerCase();
+      const sRoll = String(student['রোল নম্বর'] || student.roll || '').toLowerCase();
+      const sPhone = String(student['মোবাইল (বাবা/ভাই)'] || student.mobile || '').toLowerCase();
+      return sName.includes(term) || sId.includes(term) || sRoll.includes(term) || sPhone.includes(term);
+    });
+  }, [students, searchStudentTerm]);
 
   useEffect(() => {
     setLogs(getSentMessageLogs());
@@ -667,13 +680,29 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
       {/* Tab 4: Individual Student Custom Overrides */}
       {activeSubTab === 'students' && (
         <div className="bg-[var(--color-card)] rounded-2xl border border-[var(--color-border-main)] p-6 shadow-sm space-y-4">
-          <h3 className="font-bold text-base text-[var(--color-text-main)] flex items-center gap-2">
-            <Users className="text-teal-600" size={18} />
-            ব্যক্তিগত শিক্ষার্থী ভিত্তিক SMS কন্ট্রোল
-          </h3>
-          <p className="text-xs text-[var(--color-text-light)]">
-            কোন নির্দিষ্ট শিক্ষার্থীর জন্য সকল SMS বন্ধ রাখা বা বিশেষ ইভেন্ট চালু রাখতে এই তালিকা ব্যবহার করুন:
-          </p>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="font-bold text-base text-[var(--color-text-main)] flex items-center gap-2">
+                <Users className="text-teal-600" size={18} />
+                ব্যক্তিগত শিক্ষার্থী ভিত্তিক SMS কন্ট্রোল
+              </h3>
+              <p className="text-xs text-[var(--color-text-light)] mt-1">
+                কোন নির্দিষ্ট শিক্ষার্থীর জন্য সকল SMS বন্ধ রাখা বা বিশেষ ইভেন্ট চালু রাখতে এই তালিকা ব্যবহার করুন:
+              </p>
+            </div>
+
+            {/* Student Search Field */}
+            <div className="relative w-full sm:w-72 shrink-0">
+              <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                placeholder="শিক্ষার্থী খুঁজুন (নাম, আইডি, রোল)..."
+                value={searchStudentTerm}
+                onChange={(e) => setSearchStudentTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-semibold outline-none focus:border-teal-500"
+              />
+            </div>
+          </div>
 
           <div className="overflow-x-auto border border-[var(--color-border-main)] rounded-xl">
             <table className="w-full text-left text-xs border-collapse">
@@ -688,45 +717,53 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--color-border-main)]">
-                {students.slice(0, 50).map(student => {
-                  const sId = String(student.id || student['রেজিস্ট্রেশন/আইডি নম্বর']);
-                  const isBlocked = settings.messaging.individualStudentOverrides[sId]?.enabled === false;
-                  return (
-                    <tr key={sId} className="hover:bg-[var(--color-bg)]/50">
-                      <td className="p-3 font-bold text-[var(--color-text-main)]">
-                        {student['শিক্ষার্থীর নাম'] || student.name}
-                      </td>
-                      <td className="p-3 font-mono">{student['রোল নম্বর'] || student.roll || sId}</td>
-                      <td className="p-3">{student['জামাত/শ্রেণী'] || student.class}</td>
-                      <td className="p-3">{student.category || 'অনাবাসিক'}</td>
-                      <td className="p-3 font-mono">{student['মোবাইল (বাবা/ভাই)'] || student.mobile || '—'}</td>
-                      <td className="p-3 text-right">
-                        <button
-                          onClick={() => {
-                            const current = settings.messaging.individualStudentOverrides[sId] || { enabled: true };
-                            const updated = {
-                              ...settings,
-                              messaging: {
-                                ...settings.messaging,
-                                individualStudentOverrides: {
-                                  ...settings.messaging.individualStudentOverrides,
-                                  [sId]: { ...current, enabled: !current.enabled },
+                {filteredStudentsForOverrides.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-xs text-[var(--color-text-light)]">
+                      কোন শিক্ষার্থী পাওয়া যায়নি।
+                    </td>
+                  </tr>
+                ) : (
+                  filteredStudentsForOverrides.slice(0, 100).map(student => {
+                    const sId = String(student.id || student['রেজিস্ট্রেশন/আইডি নম্বর']);
+                    const isBlocked = settings.messaging.individualStudentOverrides[sId]?.enabled === false;
+                    return (
+                      <tr key={sId} className="hover:bg-[var(--color-bg)]/50">
+                        <td className="p-3 font-bold text-[var(--color-text-main)]">
+                          {student['শিক্ষার্থীর নাম'] || student.name}
+                        </td>
+                        <td className="p-3 font-mono">{student['রোল নম্বর'] || student.roll || sId}</td>
+                        <td className="p-3">{student['জামাত/শ্রেণী'] || student.class}</td>
+                        <td className="p-3">{student.category || 'অনাবাসিক'}</td>
+                        <td className="p-3 font-mono">{student['মোবাইল (বাবা/ভাই)'] || student.mobile || '—'}</td>
+                        <td className="p-3 text-right">
+                          <button
+                            onClick={() => {
+                              const current = settings.messaging.individualStudentOverrides[sId] || { enabled: true };
+                              const updated = {
+                                ...settings,
+                                messaging: {
+                                  ...settings.messaging,
+                                  individualStudentOverrides: {
+                                    ...settings.messaging.individualStudentOverrides,
+                                    [sId]: { ...current, enabled: !current.enabled },
+                                  }
                                 }
-                              }
-                            };
-                            handleSaveSettings(updated);
-                          }}
-                          className={cn(
-                            "px-3 py-1 rounded-lg text-xs font-bold transition-all",
-                            isBlocked ? "bg-rose-500/10 text-rose-600 border border-rose-500/30" : "bg-emerald-500/10 text-emerald-600 border border-emerald-500/30"
-                          )}
-                        >
-                          {isBlocked ? "SMS বন্ধ আছে" : "SMS সক্রিয়"}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                              };
+                              handleSaveSettings(updated);
+                            }}
+                            className={cn(
+                              "px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer",
+                              isBlocked ? "bg-rose-500/10 text-rose-600 border border-rose-500/30" : "bg-emerald-500/10 text-emerald-600 border border-emerald-500/30"
+                            )}
+                          >
+                            {isBlocked ? "SMS বন্ধ আছে" : "SMS সক্রিয়"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
