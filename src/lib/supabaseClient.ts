@@ -47,6 +47,39 @@ export async function syncStateToSupabase(key: string, data: any): Promise<boole
       console.warn(`Supabase upsert error for key ${key}:`, error.message);
       return false;
     }
+
+    // Secondary relational table mirror for student_invoices if key matches
+    if ((key === 'madrasah-invoices-db' || key === 'madrasah-student-fees-db') && Array.isArray(data)) {
+      try {
+        const rows = data.map((inv: any) => ({
+          id: String(inv.id || inv.invoiceNo),
+          invoice_no: inv.invoiceNo || '',
+          student_id: String(inv.studentId || ''),
+          student_name: inv.studentName || '',
+          student_roll: String(inv.studentRoll || ''),
+          student_class: inv.studentClass || '',
+          subtotal: Number(inv.subtotal || 0),
+          discount: Number(inv.discount || 0),
+          net_amount: Number(inv.netAmount || 0),
+          paid_amount: Number(inv.paidAmount || 0),
+          due_amount: Number(inv.dueAmount || 0),
+          status: inv.status || 'paid',
+          payment_method: inv.paymentMethod || 'ক্যাশ',
+          invoice_month: inv.month || '',
+          invoice_year: String(inv.year || ''),
+          comment: inv.comment || '',
+          created_at: inv.date ? new Date(inv.date).toISOString() : new Date().toISOString()
+        }));
+
+        if (rows.length > 0) {
+          await supabase.from('student_invoices').upsert(rows, { onConflict: 'id' });
+        }
+      } catch (rErr) {
+        // Relational mirror table fail is non-blocking
+        console.warn('Relational student_invoices sync warning:', rErr);
+      }
+    }
+
     return true;
   } catch (e) {
     console.warn(`Supabase network sync exception for key ${key}:`, e);

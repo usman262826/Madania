@@ -79,6 +79,9 @@ interface Invoice {
   studentRoll: string;
   studentClass: string;
   studentBranch: string;
+  studentFather?: string;
+  studentPhone?: string;
+  studentSession?: string;
   items: InvoiceItem[];
   subtotal: number;
   discount: number;
@@ -114,7 +117,7 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
     if (inv) {
       setActiveInvoice(inv);
     }
-    const elem = document.getElementById('printable-single-receipt') || document.getElementById('printable-receipt-container');
+    const elem = document.getElementById('printable-invoice') || document.getElementById('printable-single-receipt') || document.getElementById('printable-receipt-container');
     if (!elem) {
       setTimeout(() => {
         window.print();
@@ -981,18 +984,39 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
       return;
     }
 
-    // Validate if the same month is already paid for monthly tuition fees
-    const isMonthlyPaid = invoices.some(inv => 
-      inv.studentId === colStudentId && 
-      inv.month === colMonth && 
-      inv.year === colYear && 
-      inv.status !== 'pending' &&
-      inv.items.some(item => ['3', '4', '5'].includes(item.headId))
-    );
+    // Comprehensive Duplicate Invoice & Paid Fee Head Validation Rule:
+    const studentInvoices = invoices.filter(inv => inv.studentId === colStudentId);
 
-    if (isMonthlyPaid && colItems.some(item => ['3', '4', '5'].includes(item.headId))) {
-      alert(`এই শিক্ষার্থীর ${colMonth} ${colYear}-এর মাসিক বেতন ইতিমধ্যে জমা নেওয়া হয়েছে। দয়া করে অন্য মাস নির্বাচন করুন বা বকেয়া রসিদ যাচাই করুন।`);
-      return;
+    for (const item of colItems) {
+      if (!item.headId && !item.headName) continue;
+      const isMonthlyHead = ['3', '4', '5', '6', '14', '15'].includes(String(item.headId)) || 
+        item.headName.includes('মাসিক') || item.headName.includes('বেতন') || item.headName.includes('খোরাকী') || item.headName.includes('বিল');
+
+      const targetMonth = item.month || colMonth;
+
+      const matchingInv = studentInvoices.find(inv => {
+        const hasHead = inv.items?.some((i: any) => 
+          (item.headId && String(i.headId) === String(item.headId)) || 
+          (i.headName && i.headName.trim() === item.headName.trim())
+        );
+        if (!hasHead) return false;
+
+        if (isMonthlyHead) {
+          return inv.month === targetMonth && inv.year === colYear;
+        } else {
+          return inv.year === colYear;
+        }
+      });
+
+      if (matchingInv) {
+        if (matchingInv.status === 'paid' || Number(matchingInv.dueAmount || 0) <= 0) {
+          alert(`এই শিক্ষার্থীর "${item.headName}" (${targetMonth} ${colYear}) খাতের ফি ইতিমধ্যে সম্পূর্ণ জমা নেওয়া হয়েছে (ইনভয়েস নং: ${matchingInv.invoiceNo})। পরিশোধিত খাতের জন্য পুনরায় নতুন ইনভয়েস তৈরি করা যাবে না।`);
+          return;
+        } else {
+          alert(`এই শিক্ষার্থীর "${item.headName}" (${targetMonth} ${colYear}) খাতে ৳${enToBnNumber(matchingInv.dueAmount)} টাকা বকেয়া সম্বলিত একটি ইনভয়েস ইতিমধ্যে বিদ্যমান (ইনভয়েস নং: ${matchingInv.invoiceNo})। নতুন ইনভয়েস না বানিয়ে বিদ্যমান ইনভয়েসে বকেয়া পরিশোধ সম্পন্ন করুন।`);
+          return;
+        }
+      }
     }
 
     // Validate if any item's paid amount is less than its assigned rate
@@ -1029,6 +1053,9 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
       studentRoll: colStudent?.['রোল নম্বর'] || colStudent?.roll || '',
       studentClass: colStudent?.['জামাত/শ্রেণী'] || colStudent?.class || '',
       studentBranch: colStudent?.['শাখা'] || colStudent?.branch || 'ক',
+      studentFather: colStudent?.['পিতার নাম'] || colStudent?.fatherName || '',
+      studentPhone: colStudent?.['অভিভাবকের মোবাইল'] || colStudent?.phone || colStudent?.mobile || '',
+      studentSession: colStudent?.['শিক্ষাবর্ষ'] || colStudent?.academicYear || colStudent?.session || colYear,
       items: colItems,
       subtotal,
       discount,

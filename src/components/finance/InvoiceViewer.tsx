@@ -126,13 +126,16 @@ export const InvoiceViewer: React.FC<InvoiceViewerProps> = ({
               
               <div className="grid grid-cols-2 gap-[60px] mb-10">
                 <div>
-                  <div className="text-[11px] font-[600] text-[#555] mb-2 uppercase tracking-[0.5px]">Invoice to</div>
-                  <div className="text-[18px] font-[600] text-[#222] mb-1">{invoice?.studentName || 'শিক্ষার্থী'}</div>
-                  <div className="text-[12px] text-[#666] mb-3">{invoice?.studentClass || ''} (শাখা: {invoice?.studentBranch || 'নাই'})</div>
+                  <div className="text-[11px] font-[600] text-[#555] mb-2 uppercase tracking-[0.5px]">Invoice to (শিক্ষার্থীর তথ্য)</div>
+                  <div className="text-[18px] font-[700] text-[#222] mb-1">{invoice?.studentName || 'শিক্ষার্থী'}</div>
+                  <div className="text-[12px] font-[600] text-[#444] mb-2">{invoice?.studentClass || ''} (শাখা: {invoice?.studentBranch || 'ক'})</div>
                   
-                  <div className="text-[#666] text-[12px] leading-[1.6]">
-                    <div>রোল নং: {enToBnNumber(invoice?.studentRoll || '')}</div>
-                    <div>শিক্ষার্থী আইডি: {enToBnNumber(String(invoice?.studentId || '').slice(-6))}</div>
+                  <div className="text-[#555] text-[12px] leading-[1.6] space-y-0.5">
+                    {invoice?.studentFather && <div><span className="font-[600]">পিতার নাম:</span> {invoice.studentFather}</div>}
+                    {invoice?.studentPhone && <div><span className="font-[600]">মোবাইল:</span> {enToBnNumber(invoice.studentPhone)}</div>}
+                    <div><span className="font-[600]">রোল নং:</span> {enToBnNumber(invoice?.studentRoll || '')}</div>
+                    <div><span className="font-[600]">শিক্ষার্থী আইডি:</span> {enToBnNumber(String(invoice?.studentId || ''))}</div>
+                    {invoice?.studentSession && <div><span className="font-[600]">শিক্ষাবর্ষ:</span> {enToBnNumber(invoice.studentSession)}</div>}
                   </div>
                 </div>
                 

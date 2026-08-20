@@ -368,7 +368,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await loadAllFromSupabase();
 
       const savedFeeHeads = getLocalStorage('madrasah-fee-heads', null);
-      if (savedFeeHeads && Array.isArray(savedFeeHeads) && savedFeeHeads.length > 0) {
+      if (Array.isArray(savedFeeHeads) && savedFeeHeads.length > 0) {
         setFeeHeads(savedFeeHeads);
       } else {
         setFeeHeads(DEFAULT_FEE_HEADS);
@@ -377,36 +377,32 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setClassFeeMapping(getLocalStorage('madrasah-class-fee-mapping', {}));
       
       const savedInvoices = getLocalStorage('madrasah-invoices-db', null);
-      if (savedInvoices && Array.isArray(savedInvoices) && savedInvoices.length > 0) {
+      if (Array.isArray(savedInvoices)) {
         setInvoices(savedInvoices);
       } else {
         const legacyFees = getLocalStorage('madrasah-student-fees-db', null);
-        if (legacyFees && Array.isArray(legacyFees) && legacyFees.length > 0) {
+        if (Array.isArray(legacyFees)) {
           setInvoices(legacyFees);
           await setStorageData('madrasah-invoices-db', legacyFees);
         } else {
-          setInvoices(DEFAULT_INVOICES);
-          await setStorageData('madrasah-invoices-db', DEFAULT_INVOICES);
-          await setStorageData('madrasah-student-fees-db', DEFAULT_INVOICES);
+          setInvoices([]);
         }
       }
 
       setStaffMembers(getLocalStorage('madrasah-staff-members-db', []));
       
       const savedExpenses = getLocalStorage('madrasah-expenses-db', null);
-      if (savedExpenses && Array.isArray(savedExpenses) && savedExpenses.length > 0) {
+      if (Array.isArray(savedExpenses)) {
         setExpenses(savedExpenses);
       } else {
-        setExpenses(DEFAULT_EXPENSES);
-        await setStorageData('madrasah-expenses-db', DEFAULT_EXPENSES);
+        setExpenses([]);
       }
 
       const savedIncomes = getLocalStorage('madrasah_income_records_db', null);
-      if (savedIncomes && Array.isArray(savedIncomes) && savedIncomes.length > 0) {
+      if (Array.isArray(savedIncomes)) {
         setIncomeRecords(savedIncomes);
       } else {
-        setIncomeRecords(DEFAULT_INCOME_RECORDS);
-        await setStorageData('madrasah_income_records_db', DEFAULT_INCOME_RECORDS);
+        setIncomeRecords([]);
       }
       setStudentOverrides(getLocalStorage('madrasah-student-overrides', {}));
       let currentStudents = getLocalStorage('madrasah-students-db', []);
