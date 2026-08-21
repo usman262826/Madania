@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   LayoutGrid,
   Users,
+  QrCode,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Theme } from "../../types";
@@ -40,6 +41,7 @@ interface HeaderProps {
   activeTab: string;
   currentUser?: any;
   onOpenGlobalSearch?: (q?: string) => void;
+  onOpenQuickScan?: () => void;
 }
 
 const tabTitles: Record<string, string> = {
@@ -76,6 +78,7 @@ const tabTitles: Record<string, string> = {
   "academic-exam-dates": "পরীক্ষার সময়সীমা",
   "academic-metrics": "মূল্যায়ন মেট্রিক্স",
   "student-fees": "ফি সংগ্রহ",
+  "fees-monthly-tracker": "মাসিক বেতন ও ফি খতিয়ান",
   "finance-fees-statement": "আদায়কৃত ফি সমূহ",
   "fees-allocate": "ফি বরাদ্দ",
   "income-cash-receive": "নতুন নগদ গ্রহণ",
@@ -127,6 +130,7 @@ export function Header({
   activeTab,
   currentUser,
   onOpenGlobalSearch,
+  onOpenQuickScan,
 }: HeaderProps) {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
@@ -372,6 +376,18 @@ export function Header({
             className="lg:hidden p-2 text-primary bg-primary/10 border border-primary/20 rounded-full transition-colors cursor-pointer"
           >
             <Search className="w-5 h-5" />
+          </button>
+
+          {/* Mobile QR Scan Button */}
+          <button
+            id="mobile-header-quick-scan-btn"
+            onClick={() => {
+              if (onOpenQuickScan) onOpenQuickScan();
+            }}
+            className="lg:hidden p-2 text-emerald-600 bg-emerald-500/10 border border-emerald-500/25 rounded-full transition-colors cursor-pointer active:scale-95 transition-transform"
+            title="কুইক স্ক্যান (QR Code)"
+          >
+            <QrCode className="w-5 h-5" />
           </button>
 
           <button className="hidden sm:flex p-2 text-text-light hover:bg-step-bg hover:text-text-main rounded-full transition-colors">

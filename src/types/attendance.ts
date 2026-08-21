@@ -363,11 +363,12 @@ export interface StaffAttendanceRecord {
   attendanceDate: string; // YYYY-MM-DD
   inTime?: string;
   outTime?: string;
-  status: 'present' | 'absent' | 'late' | 'leave' | 'half-day' | 'on-duty';
+  status: 'present' | 'absent' | 'late' | 'leave' | 'half-day' | 'on-duty' | 'weekly_off';
   totalHours: number;
   overtimeHours: number;
   deductionAmount: number;
   remarks?: string;
+  markedBy?: string;
   markedAt: string;
 }
 

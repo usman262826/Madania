@@ -4,7 +4,7 @@ import { AdmissionNewStepForm } from '../admission/AdmissionNewStepForm';
 import { DatabaseMediaStore } from '../data/DatabaseMediaStore';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 import { 
   Users, 
   GraduationCap, 
@@ -2601,7 +2601,7 @@ export const AdmissionFilters: React.FC<{ students: Student[] }> = ({ students }
         XLSX.writeFile(workbook, "StudentList.xlsx");
     } else if (type === 'PDF') {
         const doc = new jsPDF();
-        (doc as any).autoTable({
+        autoTable(doc, {
             head: [['ID', 'Name', 'Father', 'Mobile', 'Class', 'Roll']],
             body: dataToExport.map(s => [
                 s['রেজিস্ট্রেশন/আইডি নম্বর'] || '',

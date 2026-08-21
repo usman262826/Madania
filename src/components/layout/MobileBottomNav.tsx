@@ -7,7 +7,8 @@ import {
   Menu, 
   ChevronUp, 
   Sparkles,
-  FileText
+  FileText,
+  QrCode
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -17,6 +18,7 @@ interface MobileBottomNavProps {
   setActiveTab: (tab: string) => void;
   setIsMobileDrawerOpen: (open: boolean) => void;
   isMobileDrawerOpen: boolean;
+  onOpenQuickScan?: () => void;
 }
 
 export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
@@ -24,6 +26,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   setActiveTab,
   setIsMobileDrawerOpen,
   isMobileDrawerOpen,
+  onOpenQuickScan,
 }) => {
   const [showScrollTop, setShowScrollTop] = useState(false);
 
@@ -117,6 +120,23 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               </button>
             );
           })}
+
+          {/* Quick Scan QR Button */}
+          {onOpenQuickScan && (
+            <button
+              id="mobile-bottom-quick-scan-btn"
+              onClick={() => onOpenQuickScan()}
+              className="flex flex-col items-center justify-center py-1 px-2 rounded-2xl transition-all duration-300 relative cursor-pointer min-w-[54px] text-emerald-600 hover:text-emerald-700 active:scale-95"
+              title="আইডি কার্ড কুইক স্ক্যানার"
+            >
+              <div className="relative p-1 bg-emerald-500/15 border border-emerald-500/30 rounded-xl">
+                <QrCode size={18} className="text-emerald-600 animate-pulse" />
+              </div>
+              <span className="text-[10px] mt-0.5 font-black tracking-tight text-emerald-600">
+                স্ক্যান
+              </span>
+            </button>
+          )}
 
           {/* Full Menu / Drawer Toggle */}
           <button

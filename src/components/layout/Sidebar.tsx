@@ -32,6 +32,7 @@ import {
   CheckCircle2,
   Sparkles,
   Trash2,
+  QrCode,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -45,6 +46,7 @@ interface SidebarProps {
   isMobileDrawerOpen: boolean;
   setIsMobileDrawerOpen: (open: boolean) => void;
   currentUser?: any;
+  onOpenQuickScan?: () => void;
 }
 
 const DateWidget = ({ isCollapsed }: { isCollapsed: boolean }) => {
@@ -106,6 +108,7 @@ export function Sidebar({
   isMobileDrawerOpen,
   setIsMobileDrawerOpen,
   currentUser,
+  onOpenQuickScan,
 }: SidebarProps) {
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>(
     {},
@@ -200,6 +203,7 @@ export function Sidebar({
       icon: Coins,
       subItems: [
         { id: "student-fees", label: "ফি সংগ্রহ" },
+        { id: "fees-monthly-tracker", label: "মাসিক বেতন ও ফি খতিয়ান" },
         { id: "finance-fees-statement", label: "আদায়কৃত ফি সমূহ" },
         { id: "fees-income-summary", label: "আয় পর্যবেক্ষণ খাত সামারি" },
         { id: "fees-cost-package", label: "খরচের প্যাকেজ /বিবরণ" },
@@ -329,6 +333,22 @@ export function Sidebar({
         </div>
 
         {/* Navigation Items */}
+        {forceExpanded && (
+          <div className="px-3 pb-2 pt-1 border-b border-white/5 mb-1 shrink-0">
+            <button
+              id="mobile-drawer-quick-scan-btn"
+              onClick={() => {
+                setIsMobileDrawerOpen(false);
+                if (onOpenQuickScan) onOpenQuickScan();
+              }}
+              className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs flex items-center justify-center gap-2 border border-white/10 shadow-lg shadow-emerald-950/20 active:scale-95 transition-transform cursor-pointer"
+            >
+              <QrCode size={16} className="animate-pulse" />
+              <span>কুইক স্ক্যান (QR Code)</span>
+            </button>
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto overflow-x-hidden no-scrollbar py-4 px-2.5 space-y-1">
           {menuItems.map((item, index) => {
             const isActive = activeTab === item.id || (item.subItems && item.subItems.some((s: any) => s.id === activeTab));

@@ -18,7 +18,7 @@ import { useData } from '../../contexts/DataContext';
 import { enToBnNumber, cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { jsPDF } from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { Download, Printer } from 'lucide-react';
 
@@ -166,7 +166,7 @@ export const Expenses: React.FC = () => {
       e.spentBy || 'N/A'
     ]);
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       head: [tableColumn],
       body: tableRows,
       startY: 40,

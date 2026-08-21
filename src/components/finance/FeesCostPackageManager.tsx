@@ -33,6 +33,9 @@ export interface FeeHead {
   allowDiscount?: boolean;
   defaultDiscount?: number;
   discountType?: 'amount' | 'percent';
+  frequency?: 'monthly_mandatory' | 'monthly_optional' | 'yearly' | 'one_time' | 'occasional';
+  applicableTo?: 'all' | 'residential' | 'non_residential' | 'day_care';
+  dueDay?: number;
 }
 
 interface ClassFeeMapping {
@@ -183,6 +186,15 @@ export const FeesCostPackageManager: React.FC = () => {
     }));
   };
 
+  const handleDraftHeadConfigChange = (headId: string, field: 'frequency' | 'applicableTo' | 'dueDay', val: any) => {
+    setDraftHeads(prev => prev.map(h => {
+      if (h.id === headId) {
+        return { ...h, [field]: val };
+      }
+      return h;
+    }));
+  };
+
   const toggleSyncRow = (headId: string) => {
     setSyncRows(prev => {
       const next = new Set(prev);
@@ -205,7 +217,14 @@ export const FeesCostPackageManager: React.FC = () => {
     }
 
     const newId = Math.random().toString(36).substr(2, 9);
-    const newHead = { id: newId, name };
+    const newHead: FeeHead = { 
+      id: newId, 
+      name, 
+      frequency: 'monthly_mandatory', 
+      applicableTo: 'all', 
+      dueDay: 12, 
+      allowDiscount: true 
+    };
     
     if (isEditing) {
       setDraftHeads([...draftHeads, newHead]);
@@ -422,6 +441,9 @@ export const FeesCostPackageManager: React.FC = () => {
                   <th className="py-4 px-3 text-[10px] font-black text-white/95 uppercase tracking-wider text-center min-w-[150px] border-l border-slate-800">
                     ছাড়ের নিয়ম / বিষয়
                   </th>
+                  <th className="py-4 px-3 text-[10px] font-black text-white/95 uppercase tracking-wider text-center min-w-[200px] border-l border-slate-800">
+                    খাতের ধরণ ও ফ্রিকোয়েন্সি
+                  </th>
                   {JAMAT_LIST.map((jamat, idx) => (
                     <th key={jamat} className="py-4 px-2 sm:px-3 text-[10px] font-black text-white/80 uppercase tracking-wider text-center min-w-[85px] sm:min-w-[90px] border-l border-slate-800">
                       <div className="truncate w-full max-w-[110px] mx-auto" title={jamat}>
@@ -530,6 +552,94 @@ export const FeesCostPackageManager: React.FC = () => {
                                 <CheckCircle2 size={11} /> ছাড় অনুমোদিত
                               </span>
                             )}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Frequency & Rules Column */}
+                      <td className="py-2 px-3 border-r border-border-main/50 align-middle min-w-[200px]">
+                        {isEditing ? (
+                          <div className="flex flex-col gap-1.5 p-1.5 bg-step-bg rounded-xl border border-border-main/50">
+                            <div>
+                              <label className="text-[9px] font-bold text-text-light/60 block mb-0.5">ফ্রিকোয়েন্সি:</label>
+                              <select
+                                value={head.frequency || 'monthly_mandatory'}
+                                onChange={(e) => handleDraftHeadConfigChange(head.id, 'frequency', e.target.value)}
+                                className="w-full px-2 py-1 bg-card border border-border-main rounded text-[10px] font-bold text-text-main cursor-pointer outline-none focus:border-primary"
+                              >
+                                <option value="monthly_mandatory">প্রতি মাসে বাধ্যতামূলক</option>
+                                <option value="monthly_optional">প্রতি মাসে অপশনাল</option>
+                                <option value="yearly">বাৎসরিক ফি</option>
+                                <option value="one_time">এককালীন / ভর্তি ফি</option>
+                                <option value="occasional">প্রয়োজনে / বিশেষ</option>
+                              </select>
+                            </div>
+
+                            <div className="flex items-center gap-1">
+                              <div className="flex-1">
+                                <label className="text-[9px] font-bold text-text-light/60 block mb-0.5">প্রযোজ্য:</label>
+                                <select
+                                  value={head.applicableTo || 'all'}
+                                  onChange={(e) => handleDraftHeadConfigChange(head.id, 'applicableTo', e.target.value)}
+                                  className="w-full px-1.5 py-1 bg-card border border-border-main rounded text-[10px] font-bold text-text-main cursor-pointer outline-none focus:border-primary"
+                                >
+                                  <option value="all">সকল বিভাগ</option>
+                                  <option value="residential">শুধু আবাসিক</option>
+                                  <option value="non_residential">শুধু অনাবাসিক</option>
+                                  <option value="day_care">শুধু ডে-কেয়ার</option>
+                                </select>
+                              </div>
+                              <div className="w-16">
+                                <label className="text-[9px] font-bold text-text-light/60 block mb-0.5">শেষ তারিখ:</label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="31"
+                                  placeholder="১২"
+                                  value={head.dueDay || 12}
+                                  onChange={(e) => handleDraftHeadConfigChange(head.id, 'dueDay', Number(e.target.value) || 12)}
+                                  className="w-full px-1 py-1 bg-card border border-border-main rounded text-[10px] font-bold text-center text-text-main outline-none focus:border-primary"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center justify-center gap-1 text-center">
+                            {head.frequency === 'monthly_mandatory' || !head.frequency ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-500/10 text-amber-700 rounded-lg text-[10px] font-black border border-amber-500/20 whitespace-nowrap">
+                                প্রতি মাসে আবশ্যক
+                              </span>
+                            ) : head.frequency === 'yearly' ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-500/10 text-indigo-700 rounded-lg text-[10px] font-black border border-indigo-500/20 whitespace-nowrap">
+                                বাৎসরিক ফি
+                              </span>
+                            ) : head.frequency === 'one_time' ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-purple-500/10 text-purple-700 rounded-lg text-[10px] font-black border border-purple-500/20 whitespace-nowrap">
+                                এককালীন ভর্তি ফি
+                              </span>
+                            ) : head.frequency === 'monthly_optional' ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-500/10 text-slate-700 rounded-lg text-[10px] font-bold border border-slate-500/20 whitespace-nowrap">
+                                মাসিক অপশনাল
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-sky-500/10 text-sky-700 rounded-lg text-[10px] font-bold border border-sky-500/20 whitespace-nowrap">
+                                প্রয়োজনে প্রযোজ্য
+                              </span>
+                            )}
+
+                            <div className="flex items-center gap-1 text-[9px] font-bold text-text-light/60">
+                              <span>
+                                {head.applicableTo === 'residential'
+                                  ? 'আবাসিক'
+                                  : head.applicableTo === 'non_residential'
+                                  ? 'অনাবাসিক'
+                                  : head.applicableTo === 'day_care'
+                                  ? 'ডে-কেয়ার'
+                                  : 'সকল'}
+                              </span>
+                              <span>•</span>
+                              <span>শেষ: {enToBnNumber(head.dueDay || 12)} তারিখ</span>
+                            </div>
                           </div>
                         )}
                       </td>

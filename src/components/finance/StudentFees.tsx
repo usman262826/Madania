@@ -11,6 +11,7 @@ import {
   XCircle, 
   HelpCircle, 
   AlertCircle,
+  AlertTriangle,
   Printer,
   Trash2,
   Eye,
@@ -34,6 +35,8 @@ import {
   Users
 } from 'lucide-react';
 import { FeesCostPackageManager } from './FeesCostPackageManager';
+import { MonthlyFeeTracker } from './MonthlyFeeTracker';
+import { BulkStudentFeeCollector } from './BulkStudentFeeCollector';
 import { InvoiceViewer } from './InvoiceViewer';
 import { Student } from '../../types';
 import { useData } from '../../contexts/DataContext';
@@ -41,7 +44,7 @@ import { enToBnNumber, cn, getActiveBranches, isClassMatch, numberToBanglaWords 
 import { motion, AnimatePresence } from 'framer-motion';
 import { JAMAT_LIST } from '../../constants';
 import { jsPDF } from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 
@@ -98,7 +101,7 @@ interface Invoice {
 
 interface StudentFeesProps {
   students: Student[];
-  initialTab?: 'collection' | 'invoices' | 'income_summary' | 'packages' | 'directory';
+  initialTab?: 'collection' | 'bulk_collection' | 'invoices' | 'monthly_tracker' | 'income_summary' | 'packages' | 'directory';
 }
 
 export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents, initialTab }) => {
@@ -152,7 +155,7 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
   }, []);
 
   // Navigation State
-  const [activeTab, setActiveTab] = useState<'collection' | 'invoices' | 'income_summary' | 'packages' | 'directory' | 'profile'>(
+  const [activeTab, setActiveTab] = useState<'collection' | 'bulk_collection' | 'invoices' | 'monthly_tracker' | 'income_summary' | 'packages' | 'directory' | 'profile'>(
     initialTab || 'collection'
   );
 
@@ -409,6 +412,7 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
   }, [students, colSearchTerm, colJamatFilter, colBranchFilter, colRollFilter]);
 
   const [colStudentId, setColStudentId] = useState('');
+  const [bulkSelectedIds, setBulkSelectedIds] = useState<string[]>([]);
   const [colDate, setColDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [colMonth, setColMonth] = useState('জুন');
   const [colYear, setColYear] = useState('২০২৬');
@@ -1426,7 +1430,7 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
       inv.status
     ]);
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       head: [tableColumn],
       body: tableRows,
       startY: 40,
@@ -1446,17 +1450,27 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
       const matchedInvs = invoices.filter(inv => 
         inv.studentId === selectedStudentId && 
         inv.month === m &&
-        inv.items.some(item => item.headName === 'মাসিক বেতন')
+        inv.items.some(item => item.headName === 'মাসিক বেতন') &&
+        inv.status !== 'void' && inv.status !== 'cancelled' && inv.status !== 'deleted'
       );
 
       if (matchedInvs.length === 0) {
         statusMap[m] = 'unbilled';
       } else {
-        const hasDue = matchedInvs.some(inv => inv.dueAmount > 0);
-        const hasPayment = matchedInvs.some(inv => inv.paidAmount > 0);
-        if (hasDue && hasPayment) statusMap[m] = 'partial';
-        else if (hasDue) statusMap[m] = 'pending';
-        else statusMap[m] = 'paid';
+        const totalNet = matchedInvs.reduce((sum, inv) => sum + (inv.netAmount || 0), 0);
+        const totalPaid = matchedInvs.reduce((sum, inv) => sum + (inv.paidAmount || 0), 0);
+        const totalDue = matchedInvs.reduce((sum, inv) => sum + (inv.dueAmount || 0), 0);
+        
+        const hasPayment = matchedInvs.some(inv => inv.status !== 'pending' && Number(inv.paidAmount || 0) > 0);
+        const hasPending = matchedInvs.some(inv => inv.status === 'pending');
+
+        if (totalPaid > 0 && totalDue === 0 && !hasPending) {
+          statusMap[m] = 'paid';
+        } else if (hasPayment && totalDue > 0) {
+          statusMap[m] = 'partial';
+        } else {
+          statusMap[m] = 'pending';
+        }
       }
     });
 
@@ -1506,7 +1520,19 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
                 : "bg-card/50 text-text-light/75 hover:bg-card hover:text-text-main border border-border-main/30"
             )}
           >
-            <CreditCard size={15} /> ফি সংগ্রহ (ইনভয়েস জেনারেটর)
+            <CreditCard size={15} /> একক ফি সংগ্রহ
+          </button>
+          <button
+            onClick={() => { setActiveTab('bulk_collection'); }}
+            className={cn(
+              "px-4 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 relative",
+              activeTab === 'bulk_collection' 
+                ? "bg-primary text-white shadow-md scale-[1.02]" 
+                : "bg-card/50 text-text-light/75 hover:bg-card hover:text-text-main border border-border-main/30"
+            )}
+          >
+            <Users size={15} /> একসাথে একাধিক ফি সংগ্রহ (বাল্ক)
+            <span className="px-1.5 py-0.5 bg-amber-400 text-black text-[9px] font-black rounded-full shadow-2xs">নতুন</span>
           </button>
           <button
             onClick={() => { setActiveTab('invoices'); }}
@@ -1518,6 +1544,17 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
             )}
           >
             <Receipt size={15} /> আদায়কৃত ফি সমূহ
+          </button>
+          <button
+            onClick={() => { setActiveTab('monthly_tracker'); }}
+            className={cn(
+              "px-4 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2",
+              activeTab === 'monthly_tracker' 
+                ? "bg-primary text-white shadow-md scale-[1.02]" 
+                : "bg-card/50 text-text-light/75 hover:bg-card hover:text-text-main border border-border-main/30"
+            )}
+          >
+            <DollarSign size={15} /> মাসিক বেতন ও ফি খতিয়ান
           </button>
           <button
             onClick={() => { setActiveTab('income_summary'); }}
@@ -1692,6 +1729,19 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
           </div>
         )}
 
+        {/* --- MODULE: Bulk Fee Collection --- */}
+        {activeTab === 'bulk_collection' && (
+          <div className="space-y-6 animate-fade-in text-left">
+            <BulkStudentFeeCollector 
+              students={students}
+              initialSelectedStudentIds={bulkSelectedIds}
+              onSelectedStudentIdsChange={setBulkSelectedIds}
+              onViewInvoice={(inv) => setActiveInvoice(inv)}
+              onNavigateToInvoices={() => setActiveTab('invoices')}
+            />
+          </div>
+        )}
+
         {/* --- MODULE C: Fee Collection Form --- */}
         {activeTab === 'collection' && (
         <div className="space-y-6 text-left animate-fade-in select-none">
@@ -1700,12 +1750,31 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-border-main/50 gap-3">
                 <div>
                   <h2 className="text-xl font-black text-text-main flex items-center gap-2">
-                    <User size={22} className="text-primary" /> শিক্ষার্থী নির্বাচন করুন (ফি সংগ্রহের জন্য)
+                    <User size={22} className="text-primary" /> একক শিক্ষার্থী নির্বাচন করুন (ফি সংগ্রহের জন্য)
                   </h2>
                   <p className="text-xs text-text-light mt-1">ফি সংগ্রহের জন্য শিক্ষার্থীর প্রোফাইল খুঁজুন ও সরাসরি নির্বাচন করুন</p>
                 </div>
-                <div className="px-3.5 py-1.5 bg-primary/10 text-primary font-black text-xs rounded-xl flex items-center gap-2 self-start sm:self-auto">
-                  <Users size={16} /> মোট শিক্ষার্থী: {enToBnNumber(colFilteredStudents.length)} জন
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  {bulkSelectedIds.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('bulk_collection')}
+                      className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl flex items-center gap-2 transition-all shadow-xs cursor-pointer animate-pulse"
+                    >
+                      <Users size={15} /> নির্বাচিত {enToBnNumber(bulkSelectedIds.length)} জনের ফি সংগ্রহ করুন ⚡
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('bulk_collection')}
+                      className="px-3.5 py-1.5 bg-primary text-white font-black text-xs rounded-xl flex items-center gap-2 hover:bg-primary/90 transition-all shadow-xs cursor-pointer"
+                    >
+                      <Users size={15} /> একসাথে একাধিক ফি সংগ্রহে যান ⚡
+                    </button>
+                  )}
+                  <div className="px-3.5 py-1.5 bg-primary/10 text-primary font-black text-xs rounded-xl flex items-center gap-2 self-start sm:self-auto">
+                    <Users size={16} /> মোট শিক্ষার্থী: {enToBnNumber(colFilteredStudents.length)} জন
+                  </div>
                 </div>
               </div>
               
@@ -1770,6 +1839,25 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
                 <table className="w-full border-collapse min-w-[680px]">
                   <thead>
                     <tr className="bg-primary text-white text-left border-b border-border-main">
+                      <th className="py-3.5 px-4 text-[11px] font-black text-white/95 uppercase tracking-widest text-center w-12">
+                        <input
+                          type="checkbox"
+                          checked={colFilteredStudents.length > 0 && colFilteredStudents.every(s => {
+                            const sId = String(s.id || s['রেজিস্ট্রেশন/আইডি নম্বর'] || '');
+                            return bulkSelectedIds.includes(sId);
+                          })}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            const filteredIds = colFilteredStudents.map(s => String(s.id || s['রেজিস্ট্রেশন/আইডি নম্বর'] || ''));
+                            if (checked) {
+                              setBulkSelectedIds(prev => Array.from(new Set([...prev, ...filteredIds])));
+                            } else {
+                              setBulkSelectedIds(prev => prev.filter(id => !filteredIds.includes(id)));
+                            }
+                          }}
+                          className="rounded text-white focus:ring-primary bg-transparent border-white/40 cursor-pointer"
+                        />
+                      </th>
                       <th className="py-3.5 px-4 text-[11px] font-black text-white/95 uppercase tracking-widest">রেজিস্ট্রেশন আইডি</th>
                       <th className="py-3.5 px-4 text-[11px] font-black text-white/95 uppercase tracking-widest">শিক্ষার্থীর বিবরণ</th>
                       <th className="py-3.5 px-4 text-[11px] font-black text-white/95 uppercase tracking-widest">পিতা-মাতা</th>
@@ -1801,7 +1889,26 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
                       }
 
                       return (
-                        <tr key={sId} className="hover:bg-primary/[0.04] transition-colors">
+                        <tr key={sId} className={cn(
+                          "hover:bg-primary/[0.04] transition-colors",
+                          bulkSelectedIds.includes(String(sId)) && "bg-primary/[0.02] border-l-2 border-l-emerald-500"
+                        )}>
+                          <td className="py-3.5 px-4 text-center">
+                            <input
+                              type="checkbox"
+                              checked={bulkSelectedIds.includes(String(sId))}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                const studentIdStr = String(sId);
+                                if (checked) {
+                                  setBulkSelectedIds(prev => [...prev, studentIdStr]);
+                                } else {
+                                  setBulkSelectedIds(prev => prev.filter(id => id !== studentIdStr));
+                                }
+                              }}
+                              className="rounded text-primary focus:ring-primary cursor-pointer"
+                            />
+                          </td>
                           <td className="py-3.5 px-4">
                             <span className="font-mono text-xs font-bold text-text-light/70 tracking-wider">#{enToBnNumber(String(sId || '').slice(-6))}</span>
                           </td>
@@ -2726,6 +2833,22 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
               const totalDue = matchedInvs.reduce((sum, inv) => sum + (inv.dueAmount || 0), 0);
               const totalNet = matchedInvs.reduce((sum, inv) => sum + (inv.netAmount || 0), 0);
 
+              if (matchedInvs.length === 0 || totalInc === 0) {
+                return (
+                  <div className="p-12 bg-card border border-border-main rounded-2xl text-center space-y-4 shadow-sm flex flex-col items-center justify-center">
+                    <div className="p-4 bg-amber-500/10 text-amber-600 rounded-full border border-amber-500/20">
+                      <AlertTriangle size={36} />
+                    </div>
+                    <div className="space-y-1.5 max-w-md">
+                      <h3 className="text-lg font-black text-text-main">কোনো আয়ের তথ্য পাওয়া যায়নি</h3>
+                      <p className="text-xs text-text-light/70 font-semibold leading-relaxed">
+                        {summaryMonthFilter === 'all' ? 'নির্বাচিত জামাতে' : `${summaryMonthFilter} মাসে`} কোনো ফি আদায়ের তথ্য নেই। অনুগ্রহ করে ফি আদায় করার পর এখানে এসে রিপোর্ট পর্যবেক্ষণ করুন।
+                      </p>
+                    </div>
+                  </div>
+                );
+              }
+
               // Aggregate by fee head
               const sectorMap: Record<string, { collected: number; discount: number; count: number }> = {};
               matchedInvs.forEach(inv => {
@@ -2877,6 +3000,19 @@ export const StudentFees: React.FC<StudentFeesProps> = ({ students: propStudents
         {activeTab === 'packages' && (
           <div className="space-y-6 animate-fade-in text-left">
             <FeesCostPackageManager />
+          </div>
+        )}
+
+        {/* --- MODULE G: Monthly Fee & Ledger Tracker --- */}
+        {activeTab === 'monthly_tracker' && (
+          <div className="space-y-6 animate-fade-in text-left">
+            <MonthlyFeeTracker 
+              students={students}
+              onNavigateToCollection={(studentId) => {
+                setColStudentId(studentId);
+                setActiveTab('collection');
+              }}
+            />
           </div>
         )}
       </div>

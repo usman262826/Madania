@@ -105,21 +105,21 @@ interface DataContextType {
 }
 
 export const DEFAULT_FEE_HEADS = [
-  { id: "1", name: "ভর্তি ফরম" },
-  { id: "2", name: "ভর্তি ফি" },
-  { id: "3", name: "আইডি কার্ড ফি" },
-  { id: "4", name: "মাসিক বেতন (অনাবাসিক)" },
-  { id: "5", name: "মাসিক বেতন (আবাসিক)" },
-  { id: "15", name: "মাসিক বেতন (ডে-কেয়ার)" },
-  { id: "6", name: "খোরাকী ফি (বোর্ডিং)" },
-  { id: "14", name: "বিদ্যুৎ বিল" },
-  { id: "7", name: "পরীক্ষার ফি" },
-  { id: "8", name: "বকেয়া" },
-  { id: "9", name: "অনলাইন / আইটি চার্জ" },
-  { id: "10", name: "প্রশংসাপত্র ফি" },
-  { id: "11", name: "প্রত্যয়ন পত্র ফি" },
-  { id: "12", name: "সনদ ফি" },
-  { id: "13", name: "অন্যান্য" }
+  { id: "1", name: "ভর্তি ফরম", frequency: "one_time", applicableTo: "all", dueDay: 12, allowDiscount: false },
+  { id: "2", name: "ভর্তি ফি", frequency: "one_time", applicableTo: "all", dueDay: 12, allowDiscount: true },
+  { id: "3", name: "আইডি কার্ড ফি", frequency: "yearly", applicableTo: "all", dueDay: 12, allowDiscount: false },
+  { id: "4", name: "মাসিক বেতন (অনাবাসিক)", frequency: "monthly_mandatory", applicableTo: "non_residential", dueDay: 12, allowDiscount: true },
+  { id: "5", name: "মাসিক বেতন (আবাসিক)", frequency: "monthly_mandatory", applicableTo: "residential", dueDay: 12, allowDiscount: true },
+  { id: "15", name: "মাসিক বেতন (ডে-কেয়ার)", frequency: "monthly_mandatory", applicableTo: "day_care", dueDay: 12, allowDiscount: true },
+  { id: "6", name: "খোরাকী ফি (বোর্ডিং)", frequency: "monthly_mandatory", applicableTo: "residential", dueDay: 12, allowDiscount: true },
+  { id: "14", name: "বিদ্যুৎ বিল", frequency: "monthly_mandatory", applicableTo: "residential", dueDay: 12, allowDiscount: false },
+  { id: "7", name: "পরীক্ষার ফি", frequency: "occasional", applicableTo: "all", dueDay: 12, allowDiscount: true },
+  { id: "8", name: "বকেয়া", frequency: "occasional", applicableTo: "all", dueDay: 12, allowDiscount: true },
+  { id: "9", name: "অনলাইন / আইটি চার্জ", frequency: "yearly", applicableTo: "all", dueDay: 12, allowDiscount: false },
+  { id: "10", name: "প্রশংসাপত্র ফি", frequency: "one_time", applicableTo: "all", dueDay: 12, allowDiscount: false },
+  { id: "11", name: "প্রত্যয়ন পত্র ফি", frequency: "one_time", applicableTo: "all", dueDay: 12, allowDiscount: false },
+  { id: "12", name: "সনদ ফি", frequency: "one_time", applicableTo: "all", dueDay: 12, allowDiscount: false },
+  { id: "13", name: "অন্যান্য", frequency: "occasional", applicableTo: "all", dueDay: 12, allowDiscount: true }
 ];
 
 export const DEFAULT_INVOICES: any[] = [];
@@ -180,7 +180,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const setStorageData = async (key: string, data: any) => {
     // Write locally and sync to Supabase
-    localStorage.setItem(key, JSON.stringify(data));
+    try {
+      localStorage.setItem(key, JSON.stringify(data));
+    } catch (e) {
+      console.warn(`localStorage write failed for ${key}:`, e);
+    }
+    try {
+      const { syncStateToSupabase } = await import('../lib/supabaseClient');
+      await syncStateToSupabase(key, data);
+    } catch (err) {
+      console.warn(`Supabase sync failed for ${key}:`, err);
+    }
   };
 
   const handleRealtimeKeyUpdate = useCallback((key: string, data: any) => {
@@ -597,17 +607,21 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await setStorageData('madrasah-students-db', updated);
         setStudents(updated);
         window.dispatchEvent(new Event('student_data_updated'));
-      } else if (table === 'invoices') {
+      } else if (table === 'invoices' || table === 'invoices_batch') {
         const currentList = getLocalStorage('madrasah-invoices-db', []);
-        const invId = payload.id || payload.invoiceNo;
-        const idx = currentList.findIndex((i: any) => i.id === invId || i.invoiceNo === invId);
-        let updated;
-        if (idx !== -1) {
-          updated = [...currentList];
-          updated[idx] = { ...updated[idx], ...payload };
-        } else {
-          updated = [...currentList, payload];
-        }
+        const itemsToProcess = Array.isArray(payload) ? payload : [payload];
+        let updated = [...currentList];
+
+        itemsToProcess.forEach((inv: any) => {
+          const invId = inv.id || inv.invoiceNo;
+          const idx = updated.findIndex((i: any) => i.id === invId || i.invoiceNo === invId);
+          if (idx !== -1) {
+            updated[idx] = { ...updated[idx], ...inv };
+          } else {
+            updated.push(inv);
+          }
+        });
+
         await setStorageData('madrasah-invoices-db', updated);
         await setStorageData('madrasah-student-fees-db', updated);
         setInvoices(updated);
@@ -667,6 +681,19 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         await setStorageData('madrasah-fee-heads', updated);
         setFeeHeads(updated);
+      } else if (table === 'student_overrides' || table === 'studentOverrides') {
+        const currentMap = getLocalStorage('madrasah-student-overrides', {});
+        let updatedMap: any;
+        if (key && typeof payload === 'object' && !Array.isArray(payload) && (payload.feeStartMonth !== undefined || payload.feeStartYear !== undefined || payload.customRates !== undefined)) {
+          updatedMap = { ...currentMap, [key]: { ...(currentMap[key] || {}), ...payload } };
+        } else if (typeof payload === 'object' && !Array.isArray(payload)) {
+          updatedMap = { ...currentMap, ...payload };
+        } else {
+          updatedMap = payload;
+        }
+        await setStorageData('madrasah-student-overrides', updatedMap);
+        setStudentOverrides(updatedMap);
+        window.dispatchEvent(new Event('madrasah-student-overrides_updated'));
       } else if (table === 'class_fee_mappings' || table === 'class_fee_mappings_all') {
         let updatedMap: any;
         if (table === 'class_fee_mappings_all' || key === 'all') {

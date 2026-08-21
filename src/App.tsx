@@ -3,6 +3,7 @@ import { Sidebar } from "./components/layout/Sidebar";
 import { Header } from "./components/layout/Header";
 import { GlobalSearchModal } from "./components/search/GlobalSearchModal";
 import { MobileBottomNav } from "./components/layout/MobileBottomNav";
+import { QuickScanModal } from "./components/layout/QuickScanModal";
 import { Analytics } from "./components/dashboard/Analytics";
 import { YearlyStudentGrid } from "./components/students/YearlyStudentGrid";
 import { PendingApplications } from "./components/pending/PendingApplications";
@@ -101,6 +102,7 @@ import { AcademicEvaluationMetrics } from "./components/academic/AcademicEvaluat
 import { StudentUpdateAll } from "./components/students/StudentUpdateAll";
 import { GlobalRecycleBin } from "./components/portal/GlobalRecycleBin";
 import { FeesCostPackageManager } from "./components/finance/FeesCostPackageManager";
+import { MonthlyFeeTracker } from "./components/finance/MonthlyFeeTracker";
 import { ProfilePage } from "./components/profile/ProfilePage";
 
 import { useData } from "./contexts/DataContext";
@@ -847,6 +849,7 @@ export default function App() {
   const [globalSearchInitialQuery, setGlobalSearchInitialQuery] = useState("");
   const [jumpToStudentId, setJumpToStudentId] = useState<string | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [isQuickScanOpen, setIsQuickScanOpen] = useState(false);
 
   // Keyboard shortcut (Ctrl + K or Cmd + K) to toggle global super search
   useEffect(() => {
@@ -1029,6 +1032,7 @@ export default function App() {
         isMobileDrawerOpen={isMobileDrawerOpen}
         setIsMobileDrawerOpen={setIsMobileDrawerOpen}
         currentUser={currentUser}
+        onOpenQuickScan={() => setIsQuickScanOpen(true)}
       />
 
       <MobileBottomNav
@@ -1036,6 +1040,13 @@ export default function App() {
         setActiveTab={setActiveTab}
         setIsMobileDrawerOpen={setIsMobileDrawerOpen}
         isMobileDrawerOpen={isMobileDrawerOpen}
+        onOpenQuickScan={() => setIsQuickScanOpen(true)}
+      />
+
+      <QuickScanModal
+        isOpen={isQuickScanOpen}
+        onClose={() => setIsQuickScanOpen(false)}
+        setActiveTab={setActiveTab}
       />
 
       <main
@@ -1062,6 +1073,7 @@ export default function App() {
           activeTab={activeTab}
           currentUser={currentUser}
           onOpenGlobalSearch={handleOpenGlobalSearch}
+          onOpenQuickScan={() => setIsQuickScanOpen(true)}
         />
 
         <div className="px-4 lg:px-8 py-4 lg:py-6 lg:pb-10">
@@ -1299,17 +1311,6 @@ export default function App() {
               </motion.div>
             )}
 
-            {activeTab === "attendance-history" && (
-              <motion.div
-                key="attendance-history"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.98 }}
-              >
-                <AttendanceHistoryView students={academicFilteredStudents} />
-              </motion.div>
-            )}
-
             {activeTab === "profile" && (
               <motion.div
                 key="profile"
@@ -1318,39 +1319,6 @@ export default function App() {
                 exit={{ opacity: 0, scale: 0.98 }}
               >
                 <ProfilePage currentUser={currentUser} setCurrentUser={setCurrentUser} />
-              </motion.div>
-            )}
-
-            {activeTab === "finance-fees-statement" && (
-              <motion.div
-                key="finance-fees-statement"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.98 }}
-              >
-                <StudentFees students={academicFilteredStudents} initialTab="invoices" />
-              </motion.div>
-            )}
-
-            {activeTab === "fees-income-summary" && (
-              <motion.div
-                key="fees-income-summary"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.98 }}
-              >
-                <StudentFees students={academicFilteredStudents} initialTab="income_summary" />
-              </motion.div>
-            )}
-
-            {activeTab === "fees-cost-package" && (
-              <motion.div
-                key="fees-cost-package"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.98 }}
-              >
-                <StudentFees students={academicFilteredStudents} initialTab="packages" />
               </motion.div>
             )}
 
@@ -1463,7 +1431,57 @@ export default function App() {
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 1.05 }}
               >
-                <StudentFees students={academicFilteredStudents} />
+                <StudentFees students={academicFilteredStudents} initialTab="collection" />
+              </motion.div>
+            )}
+
+            {activeTab === "fees-monthly-tracker" && (
+              <motion.div
+                key="fees-monthly-tracker"
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.02 }}
+              >
+                <MonthlyFeeTracker
+                  students={academicFilteredStudents}
+                  onNavigateToCollection={(studentId) => {
+                    setActiveTab("student-fees");
+                    localStorage.setItem("madrasah-temp-student-id", studentId);
+                  }}
+                />
+              </motion.div>
+            )}
+
+            {activeTab === "finance-fees-statement" && (
+              <motion.div
+                key="finance-fees-statement"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.05 }}
+              >
+                <StudentFees students={academicFilteredStudents} initialTab="invoices" />
+              </motion.div>
+            )}
+
+            {activeTab === "fees-income-summary" && (
+              <motion.div
+                key="fees-income-summary"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.05 }}
+              >
+                <StudentFees students={academicFilteredStudents} initialTab="income_summary" />
+              </motion.div>
+            )}
+
+            {activeTab === "fees-cost-package" && (
+              <motion.div
+                key="fees-cost-package"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.05 }}
+              >
+                <FeesCostPackageManager />
               </motion.div>
             )}
 
@@ -1854,24 +1872,12 @@ export default function App() {
               </motion.div>
             )}
 
-            {activeTab === "fees-cost-package" && (
-              <motion.div
-                key="fees-cost-package"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-              >
-                <FeesCostPackageManager />
-              </motion.div>
-            )}
-
             {/* Income Management */}
             {(activeTab === "income-summary" ||
               activeTab === "income-cash-receive" ||
               activeTab === "income-cash-list" ||
               activeTab === "income-general" ||
-              activeTab === "income-lillah" ||
-              activeTab === "income-chada-collect") && (
+              activeTab === "income-lillah") && (
               <motion.div
                 key="income-manager"
                 initial={{ opacity: 0, y: 10 }}

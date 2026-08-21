@@ -360,3 +360,15 @@ export const getSmsNetBdReport = async (requestId: string | number, apiKeyParam?
     };
   }
 };
+
+/**
+ * High-level helper for sending SMS to a recipient or list of recipients
+ */
+export const sendSMS = async (to: string | string[], msg: string, options?: Partial<SendSmsParams>): Promise<SmsSendResult> => {
+  return sendSmsNetBd({
+    to,
+    msg,
+    ...options,
+  });
+};
+

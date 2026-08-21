@@ -301,15 +301,21 @@ export const processAttendanceEngine = (
   rawPunches: RawPunchRecord[],
   students: Student[],
   targetDate: string = new Date().toISOString().split('T')[0],
-  settings: AttendanceSettings = getAttendanceSettings()
+  passedSettings: AttendanceSettings = getAttendanceSettings()
 ): {
   processedDailyRecords: Record<string, StudentAttendanceRecord>;
   sentMessagesCount: number;
   newDuplicatesCount: number;
 } => {
+  // Always fetch the freshest settings directly from localStorage to prevent stale closures in useEffect
+  const settings = getAttendanceSettings();
   const dailyDb = getDailyAttendanceDb();
   const dayRecords: Record<string, StudentAttendanceRecord> = { ...(dailyDb[targetDate] || {}) };
   const existingSentLogs = getSentMessageLogs();
+  
+  // To avoid blasting historical SMS, only allow automated SMS for TODAY
+  const todayStr = new Date().toISOString().split('T')[0];
+  const isToday = targetDate === todayStr;
   
   // Filter raw punches strictly for targetDate using robust date normalizer
   const dayPunches = rawPunches.filter(p => {
@@ -536,7 +542,14 @@ export const processAttendanceEngine = (
     // ---------------------------------------------------------
     // Rule 5: Automated Messaging Dispatch Engine
     // ---------------------------------------------------------
-    if (settings.messaging.enabled && guardianPhone) {
+    const isStudentBlocked = settings.messaging.individualStudentOverrides?.[sId]?.enabled === false;
+    
+    // Safety checks:
+    // 1. settings.messaging.enabled is ON
+    // 2. targetDate is TODAY (do not blast SMS when viewing historical data)
+    // 3. Student is not individually blocked
+    // 4. Guardian phone exists
+    if (settings.messaging.enabled && isToday && !isStudentBlocked && guardianPhone) {
       const msgRules = settings.messaging.rules;
       const templates = settings.messaging.templates;
 
