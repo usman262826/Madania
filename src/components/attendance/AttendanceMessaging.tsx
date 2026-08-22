@@ -35,9 +35,13 @@ import {
   clearSentMessageLogs 
 } from '../../services/attendanceEngine';
 import { 
+  sendBulkSmsBd,
   sendSmsNetBd, 
+  getBulkSmsBalance,
   getSmsNetBdBalance, 
   getSmsNetBdReport, 
+  DEFAULT_BULKSMSBD_API_KEY,
+  DEFAULT_BULKSMSBD_SENDER_ID,
   DEFAULT_SMS_NET_BD_API_KEY,
   SmsBalanceResult 
 } from '../../services/smsService';
@@ -903,7 +907,7 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-base text-[var(--color-text-main)] flex items-center gap-2">
                 <Settings className="text-teal-600" size={18} />
-                SMS.NET.BD গেটওয়ে কনফিগারেশন
+                BulkSMSBD গেটওয়ে কনফিগারেশন
               </h3>
               <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/30 text-[10px] font-bold">
                 API Live
@@ -929,9 +933,9 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
                   }}
                   className="w-full p-2.5 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-medium"
                 >
-                  <option value="sms_net_bd">SMS.NET.BD Official Gateway (সংযুক্ত ও সক্রিয়)</option>
+                  <option value="bulk_sms_bd">BulkSMSBD Gateway (সংযুক্ত ও সক্রিয়)</option>
+                  <option value="sms_net_bd">SMS.NET.BD Gateway (Legacy)</option>
                   <option value="greenweb">Greenweb SMS Gateway Bangladesh</option>
-                  <option value="bulk_sms_bd">Bulk SMS BD Gateway</option>
                   <option value="custom_api">কাস্টম HTTP API গেটওয়ে</option>
                 </select>
               </div>
@@ -954,16 +958,16 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
                     setSettings(updated);
                   }}
                   className="w-full p-2.5 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-mono font-medium"
-                  placeholder="a23Hnfiv06596m0p8r06RU8Tcs6eI49JQDL9T3Ug"
+                  placeholder="s3qQPmfL2bcBmt03K26v"
                 />
                 <p className="text-[11px] text-[var(--color-text-light)] mt-1">
-                  আপনার SMS.NET.BD অ্যাকাউন্ট এপিআই কী।
+                  আপনার BulkSMSBD অ্যাকাউন্ট এপিআই কী।
                 </p>
               </div>
 
               <div>
                 <label className="text-xs font-bold text-[var(--color-text-main)] block mb-1">
-                  অনুমোদিত Sender ID / মাস্কিং (ঐচ্ছিক):
+                  অনুমোদিত Sender ID / মাস্কিং:
                 </label>
                 <input
                   type="text"
@@ -979,7 +983,7 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
                     setSettings(updated);
                   }}
                   className="w-full p-2.5 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border-main)] text-xs font-medium"
-                  placeholder="অনুমোদিত প্রেরক নাম থাকলে লিখুন (খালি রাখলে ডিফল্ট নম্বর)"
+                  placeholder="8809648910612"
                 />
               </div>
 
@@ -1026,7 +1030,7 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
             {/* Live Balance Card */}
             <div className="bg-gradient-to-br from-teal-700 to-emerald-800 text-white rounded-2xl p-6 shadow-md space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-teal-100 uppercase tracking-wider">SMS.NET.BD লাইভ একাউন্ট</span>
+                <span className="text-xs font-bold text-teal-100 uppercase tracking-wider">BulkSMSBD লাইভ একাউন্ট</span>
                 <span className="px-2 py-0.5 rounded-full bg-white/20 text-[10px] font-bold">সক্রিয় গেটওয়ে</span>
               </div>
 
@@ -1034,14 +1038,14 @@ export const AttendanceMessaging: React.FC<AttendanceMessagingProps> = ({ studen
                 <div className="text-2xl md:text-3xl font-black font-mono">
                   {isLoadingBalance ? (
                     <span className="text-sm">ব্যালেন্স লোড হচ্ছে...</span>
-                  ) : smsBalance && smsBalance.error === 0 ? (
+                  ) : smsBalance && (smsBalance.error === 0 || smsBalance.balance !== undefined) ? (
                     `${smsBalance.balance} BDT`
                   ) : (
                     "ব্যালেন্স সংযুক্ত"
                   )}
                 </div>
                 <div className="text-xs text-teal-100 mt-1">
-                  ইউজার/স্ট্যাটাস: {smsBalance?.user || 'SMS.NET.BD Client'}
+                  ইউজার/স্ট্যাটাস: {smsBalance?.user || 'BulkSMSBD Client'}
                 </div>
               </div>
 

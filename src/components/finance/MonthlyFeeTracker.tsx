@@ -1950,7 +1950,7 @@ export const MonthlyFeeTracker: React.FC<MonthlyFeeTrackerProps> = ({
                       অভিভাবকদের মোবাইলে বকেয়া SMS পাঠান
                     </h3>
                     <p className="text-xs text-text-light/60 font-medium">
-                      SMS.NET.BD গেটওয়ে দিয়ে সরাসরি SMS প্রেরণ
+                      BulkSMSBD গেটওয়ে দিয়ে সরাসরি SMS প্রেরণ
                     </p>
                   </div>
                 </div>

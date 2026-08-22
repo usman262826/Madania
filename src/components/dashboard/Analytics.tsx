@@ -2559,7 +2559,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({
                 </div>
                 <div className="flex items-center gap-1.5 bg-teal-500/10 border border-teal-500/20 px-2.5 py-1 rounded-full text-[10px] font-black text-teal-600 dark:text-teal-400">
                   <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse"></span>
-                  <span>SMS.NET.BD লাইভ</span>
+                  <span>BulkSMSBD লাইভ</span>
                 </div>
               </div>
               <div className="mt-2.5">
@@ -2615,7 +2615,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({
                     <div className="flex items-center gap-2">
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                        SMS.NET.BD API সক্রিয়
+                        BulkSMSBD API সক্রিয়
                       </span>
                     </div>
                     <p className="text-xs text-text-light/70 font-medium mt-1">
@@ -2745,7 +2745,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({
                     {filteredSentLogs.length === 0 ? (
                       <tr>
                         <td colSpan={8} className="py-8 text-center text-text-light/60 font-medium">
-                          বর্তমানে কোনো মেসেজ পাঠানো হয়নি। বায়োমেট্রিক পাঞ্চ বা নোটিফিকেশন পাঠানো হলে SMS.NET.BD API এর মাধ্যমে প্রেরিত লাইভ রেকর্ড এখানে স্বয়ংক্রিয়ভাবে প্রদর্শিত হবে।
+                          বর্তমানে কোনো মেসেজ পাঠানো হয়নি। বায়োমেট্রিক পাঞ্চ বা নোটিফিকেশন পাঠানো হলে BulkSMSBD API এর মাধ্যমে প্রেরিত লাইভ রেকর্ড এখানে স্বয়ংক্রিয়ভাবে প্রদর্শিত হবে।
                         </td>
                       </tr>
                     ) : (

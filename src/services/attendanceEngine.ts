@@ -21,8 +21,11 @@ import {
   extractDateAndHHMM
 } from './tipsoiAttendanceService';
 import { 
+  sendBulkSmsBd,
   sendSmsNetBd, 
   getSmsNetBdBalance, 
+  DEFAULT_BULKSMSBD_API_KEY,
+  DEFAULT_BULKSMSBD_SENDER_ID,
   DEFAULT_SMS_NET_BD_API_KEY 
 } from './smsService';
 
@@ -105,10 +108,30 @@ export const getAttendanceSettings = (): AttendanceSettings => {
         messaging: { 
           ...DEFAULT_ATTENDANCE_SETTINGS.messaging, 
           ...(parsed.messaging || {}),
+          rules: {
+            ...DEFAULT_ATTENDANCE_SETTINGS.messaging.rules,
+            ...(parsed.messaging?.rules || {}),
+            entry: parsed.messaging?.rules?.entry !== undefined ? parsed.messaging.rules.entry : true,
+            exit: parsed.messaging?.rules?.exit !== undefined ? parsed.messaging.rules.exit : true,
+            late: parsed.messaging?.rules?.late !== undefined ? parsed.messaging.rules.late : true,
+            residentialRules: {
+              ...DEFAULT_ATTENDANCE_SETTINGS.messaging.rules.residentialRules,
+              ...(parsed.messaging?.rules?.residentialRules || {}),
+              entry: parsed.messaging?.rules?.residentialRules?.entry !== undefined ? parsed.messaging.rules.residentialRules.entry : true,
+            },
+            nonResidentialRules: {
+              ...DEFAULT_ATTENDANCE_SETTINGS.messaging.rules.nonResidentialRules,
+              ...(parsed.messaging?.rules?.nonResidentialRules || {}),
+              entry: parsed.messaging?.rules?.nonResidentialRules?.entry !== undefined ? parsed.messaging.rules.nonResidentialRules.entry : true,
+            },
+          },
           smsProvider: parsed.messaging?.smsProvider === 'mock_gateway' || !parsed.messaging?.smsProvider 
-            ? 'sms_net_bd' 
+            ? 'bulk_sms_bd' 
             : parsed.messaging.smsProvider,
-          providerApiKey: parsed.messaging?.providerApiKey || DEFAULT_SMS_NET_BD_API_KEY,
+          providerApiKey: (!parsed.messaging?.providerApiKey || parsed.messaging.providerApiKey === 'a23Hnfiv06596m0p8r06RU8Tcs6eI49JQDL9T3Ug')
+            ? DEFAULT_BULKSMSBD_API_KEY
+            : parsed.messaging.providerApiKey,
+          senderId: parsed.messaging?.senderId || DEFAULT_BULKSMSBD_SENDER_ID,
         },
       };
       return settings;
@@ -266,22 +289,37 @@ export const findStudentForIdentifier = (token: string, students: Student[]): St
     }
   }
 
-  // 2. Priority 2: Exact RFID / Card Number match
+  // 2. Priority 2: Exact Roll Number match
+  for (const s of students) {
+    const sRoll = normalizeIdentifier(s['রোল নম্বর'] || s['রোল'] || s.roll);
+    if (sRoll && sRoll === clean) return s;
+    if (sRoll && /^\d+$/.test(sRoll) && /^\d+$/.test(clean) && parseInt(sRoll, 10) === parseInt(clean, 10)) {
+      return s;
+    }
+  }
+
+  // 3. Priority 3: Exact RFID / Card Number match
   for (const s of students) {
     const sCard = normalizeIdentifier(s['কার্ড নম্বর'] || s.card_no || s.rfid || s['RFID']);
     if (sCard && sCard === clean) return s;
   }
 
-  // 3. Priority 3: Exact Mobile Number (requires at least 10 digits)
+  // 4. Priority 4: Exact Mobile Number (requires at least 10 digits)
   const cleanPhone = String(token).replace(/\D/g, '');
   if (cleanPhone.length >= 10) {
     for (const s of students) {
       const sMobileMom = String(s['মোবাইল (মা)'] || '').replace(/\D/g, '');
-      const sMobileDad = String(s['মোবাইল (বাবা/ভাই)'] || s['অভিভাবকের মোবাইল'] || s.mobile || '').replace(/\D/g, '');
+      const sMobileDad = String(s['মোবাইল (বাবা/ভাই)'] || s['অভিভাবকের মোবাইল'] || s.mobile || s['মোবাইল'] || '').replace(/\D/g, '');
       if ((sMobileMom && sMobileMom === cleanPhone) || (sMobileDad && sMobileDad === cleanPhone)) {
         return s;
       }
     }
+  }
+
+  // 5. Priority 5: Student Name match
+  for (const s of students) {
+    const sName = normalizeIdentifier(s['শিক্ষার্থীর নাম'] || s.name);
+    if (sName && sName === clean) return s;
   }
 
   return null;
@@ -593,13 +631,13 @@ export const processAttendanceEngine = (
 
         sentMessagesCount++;
 
-        // Trigger real live API call via sms.net.bd
-        if (settings.messaging.smsProvider === 'sms_net_bd' || !settings.messaging.smsProvider) {
-          sendSmsNetBd({
+        // Trigger real live API call via BulkSMSBD Gateway
+        if (settings.messaging.smsProvider === 'bulk_sms_bd' || settings.messaging.smsProvider === 'sms_net_bd' || !settings.messaging.smsProvider) {
+          sendBulkSmsBd({
             to: guardianPhone,
             msg: content,
-            apiKey: settings.messaging.providerApiKey || DEFAULT_SMS_NET_BD_API_KEY,
-            senderId: settings.messaging.senderId,
+            apiKey: settings.messaging.providerApiKey || DEFAULT_BULKSMSBD_API_KEY,
+            senderId: settings.messaging.senderId || DEFAULT_BULKSMSBD_SENDER_ID,
           }).then(res => {
             const logs = getSentMessageLogs();
             const targetIdx = logs.findIndex(l => l.messageId === messageLogId);
@@ -625,25 +663,22 @@ export const processAttendanceEngine = (
       else if (isWarningTriggered && msgRules.warning2Days) {
         dispatchMessage('warning2Days', templates.warning2Days);
       }
-      // Trigger 3: Absent Today
-      else if (status === 'absent' && msgRules.absent && consecutiveAbsenceDays === 1) {
-        dispatchMessage('absent', templates.absent);
-      }
-      // Trigger 4: Late Entry
+      // Trigger 3: Late Entry SMS
       else if (isLate && msgRules.late) {
         dispatchMessage('late', templates.late);
       }
-      // Trigger 5: Entry SMS (if enabled for category)
-      else if (hasValidPunch && totalEntries === 1 && totalExits === 0 && msgRules.entry) {
-        if (sCategory === 'অনাবাসিক' ? msgRules.nonResidentialRules.entry : msgRules.residentialRules.entry) {
-          dispatchMessage('entry', templates.entry);
-        }
+      // Trigger 4: Entry / Presence SMS (When biometric punch is received)
+      else if (hasValidPunch && (msgRules.entry || (sCategory === 'অনাবাসিক' ? msgRules.nonResidentialRules?.entry !== false : msgRules.residentialRules?.entry !== false))) {
+        dispatchMessage('entry', templates.entry);
       }
-      // Trigger 6: Exit SMS
-      else if (lastExitTime && msgRules.exit) {
-        if (sCategory === 'অনাবাসিক' ? msgRules.nonResidentialRules.exit : msgRules.residentialRules.nightExit) {
-          dispatchMessage('exit', templates.exit);
-        }
+      // Trigger 5: Absent Today (Only if student has no punches and absent rule is active)
+      else if (status === 'absent' && msgRules.absent && !hasValidPunch && consecutiveAbsenceDays === 1) {
+        dispatchMessage('absent', templates.absent);
+      }
+
+      // Trigger 6: Exit SMS (When student has punched out)
+      if (lastExitTime && (msgRules.exit || (sCategory === 'অনাবাসিক' ? msgRules.nonResidentialRules?.exit !== false : msgRules.residentialRules?.nightExit !== false))) {
+        dispatchMessage('exit', templates.exit);
       }
     }
   });
@@ -1147,8 +1182,8 @@ export const getSmsAccountStats = (): SmsAccountStats => {
     sentThisMonth,
     failedCount,
     deliveryRate,
-    gatewayName: settings.messaging.smsProvider === 'sms_net_bd' ? 'SMS.NET.BD Official Gateway' : 'SMS Gateway',
-    senderId: settings.messaging.senderId || 'SMS.NET.BD',
+    gatewayName: settings.messaging.smsProvider === 'bulk_sms_bd' || settings.messaging.smsProvider === 'sms_net_bd' ? 'BulkSMSBD Official Gateway' : 'SMS Gateway',
+    senderId: settings.messaging.senderId || '8809648910612',
   };
 };
 

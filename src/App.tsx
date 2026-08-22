@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Sidebar } from "./components/layout/Sidebar";
 import { Header } from "./components/layout/Header";
 import { GlobalSearchModal } from "./components/search/GlobalSearchModal";
@@ -184,6 +184,67 @@ export default function App() {
   const [editingApplication, setEditingApplication] =
     useState<Application | null>(null);
 
+  // -------------------------------------------------------------
+  // SESSION & SECURITY MANAGEMENT (1 HOUR INACTIVITY TIMEOUT)
+  // -------------------------------------------------------------
+  const INACTIVITY_TIMEOUT_MS = 3600000; // 1 Hour (3,600,000 milliseconds)
+
+  const [sessionToken, setSessionToken] = useState<string | null>(() => {
+    return localStorage.getItem("madrasa_auth_token");
+  });
+
+  // Thorough Logout
+  const handleLogout = useCallback(async (isExpired = false, reason?: string) => {
+    const token = localStorage.getItem("madrasa_auth_token");
+    if (token) {
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ token })
+        }).catch(() => {});
+      } catch (e) { console.warn(e); }
+    }
+
+    setIsLoggedIn(false);
+    setCurrentUser(null);
+    setSessionToken(null);
+
+    // Clear all security & authentication storage items
+    localStorage.removeItem("madrasa_admin_auth");
+    localStorage.removeItem("madrasa_auth_token");
+    localStorage.removeItem("madrasa_session_expiry");
+    localStorage.removeItem("madrasa_last_activity");
+    localStorage.removeItem("madrasa_current_user");
+    localStorage.removeItem("madrasa_user_password");
+
+    // Reset active tab to default
+    setActiveTab("dashboard");
+
+    // Purge history state so back button cannot re-enter protected routes
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+
+    if (isExpired && reason) {
+      setLoginError(reason);
+    } else {
+      setLoginError("");
+    }
+  }, []);
+
+  // Update Activity Timestamp on User Interaction
+  const touchSessionActivity = useCallback(() => {
+    if (!localStorage.getItem("madrasa_admin_auth")) return;
+    const now = Date.now();
+    const last = parseInt(localStorage.getItem("madrasa_last_activity") || "0", 10);
+    // Throttle localStorage updates to max once every 5 seconds
+    if (now - last > 5000) {
+      localStorage.setItem("madrasa_last_activity", now.toString());
+      localStorage.setItem("madrasa_session_expiry", (now + INACTIVITY_TIMEOUT_MS).toString());
+    }
+  }, []);
+
   // Handle Login
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -194,139 +255,167 @@ export default function App() {
     const cleanPass = password.trim();
 
     try {
-      const { supabase } = await import('./lib/supabaseClient');
-      
-      // 1. Check in Supabase `app_users` table directly
       let authenticatedUser: any = null;
+      let token: string | null = null;
 
+      // 1. First try server-side authentication endpoint
       try {
-        const { data: dbUsers, error: dbErr } = await supabase
-          .from('app_users')
-          .select('*')
-          .or(`email.ilike.${cleanInput},phone.ilike.${cleanInput}`);
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cleanInput, password: cleanPass })
+        });
 
-        if (dbUsers && dbUsers.length > 0) {
-          const u = dbUsers[0];
-          // Check password: match plaintext or password_hash
-          if (u.password_hash === cleanPass || u.password === cleanPass) {
-            authenticatedUser = {
-              id: u.id,
-              name: u.name,
-              role: u.role || 'admin',
-              designation: u.designation || (u.role === 'admin' ? 'এডমিন' : 'কর্মকর্তা'),
-              email: u.email || u.phone,
-              mobile: u.phone || u.email,
-              status: u.status || 'Approved',
-              loginPermitted: u.status === 'Approved',
-              password: cleanPass
-            };
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.token && data.user) {
+            authenticatedUser = data.user;
+            token = data.token;
+          }
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          if (errData.error) {
+            setLoginError(errData.error);
+            setIsLoading(false);
+            return;
           }
         }
-      } catch (dbErr) {
-        console.warn("app_users database lookup skipped:", dbErr);
+      } catch (srvErr) {
+        console.warn("Server auth API unreachable, falling back to client validation:", srvErr);
       }
 
-      // 2. If not found in app_users, check Supabase madrasah_app_state sync
+      // 2. Client-side database lookup fallback (if server API not mounted/reachable)
       if (!authenticatedUser) {
+        const { supabase } = await import('./lib/supabaseClient');
+        
+        // Check in Supabase `app_users` table
         try {
-          const { data: stateData } = await supabase
-            .from('madrasah_app_state')
+          const { data: dbUsers } = await supabase
+            .from('app_users')
             .select('*')
-            .in('id', ['madrasa_users', 'madrasa_teachers']);
+            .or(`email.ilike.${cleanInput},phone.ilike.${cleanInput}`);
 
-          let cloudUsers: any[] = [];
-          if (stateData && stateData.length > 0) {
-            stateData.forEach((row: any) => {
-              const parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
-              if (Array.isArray(parsed)) {
-                cloudUsers.push(...parsed);
-              }
-            });
+          if (dbUsers && dbUsers.length > 0) {
+            const u = dbUsers[0];
+            if (u.password_hash === cleanPass || u.password === cleanPass) {
+              authenticatedUser = {
+                id: u.id,
+                name: u.name,
+                role: u.role || 'admin',
+                designation: u.designation || (u.role === 'admin' ? 'এডমিন' : 'কর্মকর্তা'),
+                email: u.email || u.phone,
+                mobile: u.phone || u.email,
+                status: u.status || 'Approved',
+                loginPermitted: u.status === 'Approved',
+                password: cleanPass
+              };
+            }
           }
+        } catch (dbErr) {
+          console.warn("app_users lookup skipped:", dbErr);
+        }
 
-          const matchedCloud = cloudUsers.find(u => {
+        // Check in Supabase madrasah_app_state sync
+        if (!authenticatedUser) {
+          try {
+            const { data: stateData } = await supabase
+              .from('madrasah_app_state')
+              .select('*')
+              .in('id', ['madrasa_users', 'madrasa_teachers']);
+
+            let cloudUsers: any[] = [];
+            if (stateData) {
+              stateData.forEach((row: any) => {
+                const parsed = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+                if (Array.isArray(parsed)) cloudUsers.push(...parsed);
+              });
+            }
+
+            const matchedCloud = cloudUsers.find(u => {
+              const uMobile = (u.mobile || '').toString().trim().toLowerCase();
+              const uEmail = (u.email || '').toString().trim().toLowerCase();
+              const uPhone = (u.phone || '').toString().trim().toLowerCase();
+              const uId = (u.id || '').toString().trim().toLowerCase();
+
+              return (uMobile === cleanInput || uEmail === cleanInput || uPhone === cleanInput || uId === cleanInput) &&
+                     (u.password || '').toString().trim() === cleanPass;
+            });
+
+            if (matchedCloud) {
+              authenticatedUser = {
+                id: matchedCloud.id || 'USR-01',
+                name: matchedCloud.name || 'ব্যবহারকারী',
+                role: matchedCloud.role || 'teacher',
+                designation: matchedCloud.designation || 'কর্মকর্তা',
+                email: matchedCloud.email || matchedCloud.mobile || '',
+                mobile: matchedCloud.mobile || matchedCloud.email || '',
+                status: matchedCloud.status || (matchedCloud.loginPermitted ? 'Approved' : 'Pending'),
+                loginPermitted: matchedCloud.loginPermitted !== false && matchedCloud.status !== 'Blocked' && matchedCloud.status !== 'Pending',
+                password: cleanPass
+              };
+            }
+          } catch (stateErr) {
+            console.warn("madrasah_app_state lookup skipped:", stateErr);
+          }
+        }
+
+        // Check local saved users cache
+        if (!authenticatedUser) {
+          let localUsers: any[] = [];
+          try {
+            const savedU = localStorage.getItem("madrasa_users");
+            if (savedU) localUsers.push(...JSON.parse(savedU));
+            const savedT = localStorage.getItem("madrasa_teachers");
+            if (savedT) localUsers.push(...JSON.parse(savedT));
+          } catch (e) { console.error(e); }
+
+          const matchedLocal = localUsers.find(u => {
             const uMobile = (u.mobile || '').toString().trim().toLowerCase();
             const uEmail = (u.email || '').toString().trim().toLowerCase();
             const uPhone = (u.phone || '').toString().trim().toLowerCase();
             const uId = (u.id || '').toString().trim().toLowerCase();
 
-            const isMatch = uMobile === cleanInput || uEmail === cleanInput || uPhone === cleanInput || uId === cleanInput;
-            if (!isMatch) return false;
-            return (u.password || '').toString().trim() === cleanPass;
+            return (uMobile === cleanInput || uEmail === cleanInput || uPhone === cleanInput || uId === cleanInput) &&
+                   (u.password || '').toString().trim() === cleanPass;
           });
 
-          if (matchedCloud) {
+          if (matchedLocal) {
             authenticatedUser = {
-              id: matchedCloud.id || 'USR-01',
-              name: matchedCloud.name || 'ব্যবহারকারী',
-              role: matchedCloud.role || 'teacher',
-              designation: matchedCloud.designation || 'কর্মকর্তা',
-              email: matchedCloud.email || matchedCloud.mobile || '',
-              mobile: matchedCloud.mobile || matchedCloud.email || '',
-              status: matchedCloud.status || (matchedCloud.loginPermitted ? 'Approved' : 'Pending'),
-              loginPermitted: matchedCloud.loginPermitted !== false && matchedCloud.status !== 'Blocked' && matchedCloud.status !== 'Pending',
+              id: matchedLocal.id || 'USR-01',
+              name: matchedLocal.name || 'ব্যবহারকারী',
+              role: matchedLocal.role || 'teacher',
+              designation: matchedLocal.designation || 'কর্মকর্তা',
+              email: matchedLocal.email || matchedLocal.mobile || '',
+              mobile: matchedLocal.mobile || matchedLocal.email || '',
+              status: matchedLocal.status || (matchedLocal.loginPermitted ? 'Approved' : 'Pending'),
+              loginPermitted: matchedLocal.loginPermitted !== false && matchedLocal.status !== 'Blocked' && matchedLocal.status !== 'Pending',
               password: cleanPass
             };
           }
-        } catch (stateErr) {
-          console.warn("madrasah_app_state lookup skipped:", stateErr);
         }
-      }
 
-      // 3. Check local saved users cache
-      if (!authenticatedUser) {
-        let localUsers: any[] = [];
-        try {
-          const savedU = localStorage.getItem("madrasa_users");
-          if (savedU) localUsers.push(...JSON.parse(savedU));
-          const savedT = localStorage.getItem("madrasa_teachers");
-          if (savedT) localUsers.push(...JSON.parse(savedT));
-        } catch (e) { console.error(e); }
-
-        const matchedLocal = localUsers.find(u => {
-          const uMobile = (u.mobile || '').toString().trim().toLowerCase();
-          const uEmail = (u.email || '').toString().trim().toLowerCase();
-          const uPhone = (u.phone || '').toString().trim().toLowerCase();
-          const uId = (u.id || '').toString().trim().toLowerCase();
-
-          const isMatch = uMobile === cleanInput || uEmail === cleanInput || uPhone === cleanInput || uId === cleanInput;
-          if (!isMatch) return false;
-          return (u.password || '').toString().trim() === cleanPass;
-        });
-
-        if (matchedLocal) {
-          authenticatedUser = {
-            id: matchedLocal.id || 'USR-01',
-            name: matchedLocal.name || 'ব্যবহারকারী',
-            role: matchedLocal.role || 'teacher',
-            designation: matchedLocal.designation || 'কর্মকর্তা',
-            email: matchedLocal.email || matchedLocal.mobile || '',
-            mobile: matchedLocal.mobile || matchedLocal.email || '',
-            status: matchedLocal.status || (matchedLocal.loginPermitted ? 'Approved' : 'Pending'),
-            loginPermitted: matchedLocal.loginPermitted !== false && matchedLocal.status !== 'Blocked' && matchedLocal.status !== 'Pending',
-            password: cleanPass
-          };
-        }
-      }
-
-      // 4. Initial setup fallback (Only for first-time bootstrapping if no users exist in database)
-      if (!authenticatedUser) {
-        // We only allow if explicit match with system admin configuration
-        const savedAdmins = localStorage.getItem("madrasa_users");
-        if (!savedAdmins) {
-          if ((cleanInput === 'admin@madrasah.com' || cleanInput === '01700000000' || cleanInput === 'admin') && cleanPass === '123456') {
-            authenticatedUser = {
-              id: 'ADM01',
-              name: 'মুহতামিম সাহেব (সুপার এডমিন)',
-              role: 'admin',
-              designation: 'প্রধান প্রশাসনিক কর্মকর্তা',
-              mobile: '01700000000',
-              email: 'admin@madrasah.com',
-              status: 'Approved',
-              loginPermitted: true,
-              password: cleanPass
-            };
+        // Initial setup fallback
+        if (!authenticatedUser) {
+          const savedAdmins = localStorage.getItem("madrasa_users");
+          if (!savedAdmins) {
+            if ((cleanInput === 'admin@madrasah.com' || cleanInput === '01700000000' || cleanInput === 'admin') && cleanPass === '123456') {
+              authenticatedUser = {
+                id: 'ADM01',
+                name: 'মুহতামিম সাহেব (সুপার এডমিন)',
+                role: 'admin',
+                designation: 'প্রধান প্রশাসনিক কর্মকর্তা',
+                mobile: '01700000000',
+                email: 'admin@madrasah.com',
+                status: 'Approved',
+                loginPermitted: true,
+                password: cleanPass
+              };
+            }
           }
+        }
+
+        if (authenticatedUser) {
+          token = 'clt_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
         }
       }
 
@@ -337,11 +426,20 @@ export default function App() {
           return;
         }
 
+        const now = Date.now();
+        const sessionExpiry = now + INACTIVITY_TIMEOUT_MS; // 1 hour
+
         setCurrentUser(authenticatedUser);
+        setSessionToken(token);
         setIsLoggedIn(true);
+
         localStorage.setItem("madrasa_admin_auth", "true");
+        localStorage.setItem("madrasa_auth_token", token || "");
+        localStorage.setItem("madrasa_last_activity", now.toString());
+        localStorage.setItem("madrasa_session_expiry", sessionExpiry.toString());
         localStorage.setItem("madrasa_current_user", JSON.stringify(authenticatedUser));
         localStorage.setItem("madrasa_user_password", cleanPass);
+
         setIsLoading(false);
         return;
       }
@@ -355,34 +453,71 @@ export default function App() {
     }
   };
 
-  // Auth check on mount & PopState listener initialization
+  // Session Security Poller & User Activity Event Listeners
   useEffect(() => {
-    const checkUser = async () => {
+    const checkSessionValidity = () => {
       const auth = localStorage.getItem("madrasa_admin_auth");
-      if (auth === "true") setIsLoggedIn(true);
-      loadAllData();
+      if (auth === "true") {
+        const now = Date.now();
+        const lastActivity = parseInt(localStorage.getItem("madrasa_last_activity") || "0", 10);
+        const sessionExpiry = parseInt(localStorage.getItem("madrasa_session_expiry") || "0", 10);
+
+        if ((lastActivity > 0 && now - lastActivity >= INACTIVITY_TIMEOUT_MS) || (sessionExpiry > 0 && now >= sessionExpiry)) {
+          handleLogout(true, "আপনার সেশন ১ ঘণ্টা নিষ্ক্রিয় থাকার কারণে শেষ হয়ে গেছে। অনুগ্রহ করে পুনরায় লগইন করুন।");
+          return false;
+        }
+        return true;
+      } else {
+        if (isLoggedIn) {
+          handleLogout();
+        }
+        return false;
+      }
     };
 
-    checkUser();
+    const isValid = checkSessionValidity();
+    if (isValid && !isLoggedIn) {
+      setIsLoggedIn(true);
+      loadAllData();
+    }
+
+    const intervalId = setInterval(() => {
+      checkSessionValidity();
+    }, 10000);
+
+    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
+    const handleUserActivity = () => {
+      if (checkSessionValidity()) {
+        touchSessionActivity();
+      }
+    };
+
+    activityEvents.forEach((evt) => {
+      window.addEventListener(evt, handleUserActivity, { passive: true });
+    });
+
+    const handleFocus = () => {
+      checkSessionValidity();
+    };
+    window.addEventListener('focus', handleFocus);
 
     const handleHydration = () => {
-      const auth = localStorage.getItem("madrasa_admin_auth");
-      if (auth === "true") setIsLoggedIn(true);
-      
-      const savedUser = localStorage.getItem("madrasa_current_user");
-      if (savedUser) setCurrentUser(JSON.parse(savedUser));
-      
-      const savedPending = localStorage.getItem('madrasa_pending_applications');
-      if (savedPending) setPending(JSON.parse(savedPending));
-      
-      const savedSidebar = localStorage.getItem('sidebar-mode');
-      if (savedSidebar === "hidden" || savedSidebar === "mini" || savedSidebar === "expanded") {
-        setSidebarMode(savedSidebar);
+      if (checkSessionValidity()) {
+        setIsLoggedIn(true);
+        const savedUser = localStorage.getItem("madrasa_current_user");
+        if (savedUser) setCurrentUser(JSON.parse(savedUser));
+        
+        const savedPending = localStorage.getItem('madrasa_pending_applications');
+        if (savedPending) setPending(JSON.parse(savedPending));
       }
     };
     window.addEventListener('supabase_hydration_complete', handleHydration);
 
     const handlePopState = (event: PopStateEvent) => {
+      if (!localStorage.getItem("madrasa_admin_auth")) {
+        handleLogout();
+        return;
+      }
       if (event.state && event.state.activeTab) {
         isPopStateRef.current = true;
         setActiveTab(event.state.activeTab);
@@ -395,11 +530,17 @@ export default function App() {
     };
 
     window.addEventListener("popstate", handlePopState);
+
     return () => {
+      clearInterval(intervalId);
+      activityEvents.forEach((evt) => {
+        window.removeEventListener(evt, handleUserActivity);
+      });
+      window.removeEventListener('focus', handleFocus);
       window.removeEventListener('supabase_hydration_complete', handleHydration);
       window.removeEventListener("popstate", handlePopState);
     };
-  }, []);
+  }, [isLoggedIn, handleLogout, touchSessionActivity]);
 
   // Custom global navigation tab handler for interconnected portal modules
   useEffect(() => {
@@ -543,11 +684,6 @@ export default function App() {
         setIsLoading(false);
       }
     }
-  };
-
-  const handleLogout = async () => {
-    setIsLoggedIn(false);
-    localStorage.removeItem("madrasa_admin_auth");
   };
 
   const [isProcessingId, setIsProcessingId] = useState<string | null>(null);
